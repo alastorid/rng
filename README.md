@@ -96,6 +96,8 @@ See [DATASET.md](DATASET.md) for the dataset format and Bitcoin Core acquisition
 
 For low-storage full-real generation, use a pruned Bitcoin Core node; see [BITCOIN_CORE_PRUNED.md](BITCOIN_CORE_PRUNED.md).
 
+For a future native/OpenCL engine, see [GPU_ENGINE.md](GPU_ENGINE.md).
+
 ## Optional Remote API Mode
 
 Remote mode is still available for quick comparison, but it is not the preferred experiment path:
