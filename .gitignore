@@ -1,6 +1,7 @@
 node_modules/
 *.sqlite-shm
 *.sqlite-wal
+data/blockchair_bitcoin_addresses_*.tsv.gz
 logs/*.jsonl
 logs/*.json
 logs/*.enc.jsonl

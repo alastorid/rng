@@ -6,6 +6,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import readline from 'node:readline';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import {
   binaryLookup,
@@ -41,8 +43,9 @@ Options:
   --real-script-dataset <path>
                             Use real script-key CSV dataset and do no network checks.
   --address-db <path>       Use simple SQLite address->balance DB and do no network checks.
+  --address-dump <path>     Use Blockchair-style address<TAB>balance dump, .tsv or .tsv.gz.
   --min-address-db-records <n>
-                            Refuse small address DBs. Default: 1000000
+                            Refuse small local address datasets. Default: 1000000
   --allow-small-db          Allow seed/test address DBs below the minimum.
   --lookup-mode <mode>      Local lookup mode: hashmap or binary. Default: hashmap
   --log-dir <path>          Directory for append-only logs. Default: ./logs
@@ -68,6 +71,7 @@ function parseArgs(argv) {
     localDataset: null,
     realScriptDataset: null,
     addressDb: null,
+    addressDump: null,
     minAddressDbRecords: 1_000_000,
     allowSmallDb: false,
     lookupMode: 'hashmap',
@@ -94,6 +98,7 @@ function parseArgs(argv) {
     else if (arg === '--local-dataset') args.localDataset = path.resolve(needValue());
     else if (arg === '--real-script-dataset') args.realScriptDataset = path.resolve(needValue());
     else if (arg === '--address-db') args.addressDb = path.resolve(needValue());
+    else if (arg === '--address-dump') args.addressDump = path.resolve(needValue());
     else if (arg === '--min-address-db-records') args.minAddressDbRecords = Number.parseInt(needValue(), 10);
     else if (arg === '--allow-small-db') args.allowSmallDb = true;
     else if (arg === '--lookup-mode') args.lookupMode = needValue();
@@ -121,9 +126,9 @@ function parseArgs(argv) {
   if (!['hashmap', 'binary'].includes(args.lookupMode)) {
     throw new Error('--lookup-mode must be hashmap or binary');
   }
-  const localModes = [args.localDataset, args.realScriptDataset, args.addressDb].filter(Boolean).length;
+  const localModes = [args.localDataset, args.realScriptDataset, args.addressDb, args.addressDump].filter(Boolean).length;
   if (localModes > 1) {
-    throw new Error('Use only one local lookup mode: --local-dataset, --real-script-dataset, or --address-db');
+    throw new Error('Use only one local lookup mode: --local-dataset, --real-script-dataset, --address-db, or --address-dump');
   }
   if (!Number.isSafeInteger(args.minAddressDbRecords) || args.minAddressDbRecords < 1) {
     throw new Error('--min-address-db-records must be a positive integer');
@@ -307,6 +312,61 @@ function addressDbState(record) {
   };
 }
 
+function addressDumpState(record) {
+  const exists = Boolean(record);
+  const balanceSats = record?.balanceSats ?? 0n;
+  return {
+    source: 'local-real-address-dump',
+    txCount: null,
+    fundedSats: null,
+    spentSats: null,
+    balanceSats: balanceSats.toString(),
+    balanceBtc: record?.balanceBtc ?? null,
+    appearedOnChain: exists,
+    hasHistory: exists,
+    hasBalance: balanceSats > 0n,
+    datasetAddress: record?.address ?? null,
+    explorerUrl: record?.explorerUrl ?? null,
+    datasetSource: record?.source ?? null
+  };
+}
+
+function satsToBtcString(sats) {
+  const whole = sats / 100_000_000n;
+  const fraction = (sats % 100_000_000n).toString().padStart(8, '0');
+  return `${whole}.${fraction}`;
+}
+
+async function loadAddressDump(file) {
+  const input = fs.createReadStream(file);
+  const stream = file.endsWith('.gz') ? input.pipe(zlib.createGunzip()) : input;
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  const map = new Map();
+  let lineNo = 0;
+
+  for await (const line of rl) {
+    lineNo += 1;
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    if (lineNo === 1 && /^address[\t,]balance/.test(trimmed.toLowerCase())) continue;
+    const delimiter = trimmed.includes('\t') ? '\t' : ',';
+    const [address, balanceRaw, balanceBtc, explorerUrl, source] = trimmed.split(delimiter);
+    if (!address || !balanceRaw) {
+      throw new Error(`Invalid address dump line ${lineNo}: ${line}`);
+    }
+    const balanceSats = BigInt(balanceRaw);
+    map.set(address, {
+      address,
+      balanceSats,
+      balanceBtc: balanceBtc || satsToBtcString(balanceSats),
+      explorerUrl: explorerUrl || `https://blockstream.info/address/${address}`,
+      source: source || `address-dump:${path.basename(file)}`
+    });
+  }
+
+  return map;
+}
+
 function loadScriptDataset(file) {
   const text = fs.readFileSync(file, 'utf8');
   const map = new Map();
@@ -364,6 +424,7 @@ async function main() {
   let addressDb = null;
   let addressDbLookup = null;
   let addressDbRecords = 0;
+  let addressDumpMap = null;
 
   if (args.localDataset) {
     localDataset = fs.readFileSync(args.localDataset);
@@ -389,6 +450,16 @@ async function main() {
       WHERE address = ?
     `);
   }
+  if (args.addressDump) {
+    console.log(`Loading real address dump: ${args.addressDump}`);
+    addressDumpMap = await loadAddressDump(args.addressDump);
+    if (!args.allowSmallDb && addressDumpMap.size < args.minAddressDbRecords) {
+      throw new Error(
+        `Address dump has only ${addressDumpMap.size} rows. Refusing to treat it as a full real dataset. ` +
+        `Use the complete funded-address dump, or pass --allow-small-db for explicit seed/testing runs.`
+      );
+    }
+  }
 
   const manifest = {
     runId,
@@ -398,8 +469,10 @@ async function main() {
       ? 'real-script-dataset'
       : args.addressDb
         ? 'real-address-db'
+      : args.addressDump
+        ? 'real-address-dump'
       : args.localDataset ? 'local-dataset' : args.dryRun ? 'dry-run' : 'remote-api',
-    apiBase: args.localDataset || args.realScriptDataset || args.addressDb ? null : args.apiBase,
+    apiBase: args.localDataset || args.realScriptDataset || args.addressDb || args.addressDump ? null : args.apiBase,
     localDataset: args.localDataset
       ? {
           path: args.localDataset,
@@ -422,6 +495,16 @@ async function main() {
           sha256: fileSha256(args.addressDb),
           bytes: fs.statSync(args.addressDb).size,
           records: addressDbRecords,
+          minRequiredRecords: args.minAddressDbRecords,
+          allowSmallDb: args.allowSmallDb
+      }
+      : null,
+    addressDump: args.addressDump
+      ? {
+          path: args.addressDump,
+          sha256: fileSha256(args.addressDump),
+          bytes: fs.statSync(args.addressDump).size,
+          records: addressDumpMap.size,
           minRequiredRecords: args.minAddressDbRecords,
           allowSmallDb: args.allowSmallDb
         }
@@ -466,7 +549,8 @@ async function main() {
     hasBalance: 0,
     checkedHash160s: 0,
     checkedScriptKeys: 0,
-    checkedAddressDbRows: 0
+    checkedAddressDbRows: 0,
+    checkedAddressDumpRows: 0
   };
 
   console.log(`Run ${runId}`);
@@ -476,6 +560,7 @@ async function main() {
   if (args.localDataset) console.log(`Local dataset: ${args.localDataset} (${args.lookupMode})`);
   if (args.realScriptDataset) console.log(`Real script dataset: ${args.realScriptDataset}`);
   if (args.addressDb) console.log(`Real address DB: ${args.addressDb}`);
+  if (args.addressDump) console.log(`Real address dump: ${args.addressDump}`);
   if (vaultPass) console.log(`Encrypted hit-key vault: ${vaultFile}`);
 
   let index = 0;
@@ -517,7 +602,7 @@ async function main() {
       try {
         state = args.dryRun
           ? {
-              source: args.localDataset || args.realScriptDataset || args.addressDb ? 'dry-run-local-dataset' : 'dry-run',
+              source: args.localDataset || args.realScriptDataset || args.addressDb || args.addressDump ? 'dry-run-local-dataset' : 'dry-run',
               txCount: null,
               fundedSats: null,
               spentSats: null,
@@ -532,6 +617,8 @@ async function main() {
             ? scriptDatasetState(realScriptDatasetMap.get(`${candidate.type === 'p2pkh-compressed' ? 'p2pkh' : candidate.type}:${derived.pubKeyHashHex}`))
           : args.addressDb
             ? addressDbState(addressDbLookup.get(candidate.address))
+          : args.addressDump
+            ? addressDumpState(addressDumpMap.get(candidate.address))
           : await fetchAddressState(args.apiBase, candidate.address);
       } catch (err) {
         stats.apiErrors += 1;
@@ -554,6 +641,7 @@ async function main() {
       if (state?.hasBalance) stats.hasBalance += 1;
       if (args.realScriptDataset && !args.dryRun) stats.checkedScriptKeys += 1;
       if (args.addressDb && !args.dryRun) stats.checkedAddressDbRows += 1;
+      if (args.addressDump && !args.dryRun) stats.checkedAddressDumpRows += 1;
 
       if (state?.appearedOnChain || state?.hasHistory || state?.hasBalance) {
         const hitRecord = {

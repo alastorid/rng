@@ -36,7 +36,13 @@ npm run start:local -- --continuous --delay-ms 0
 
 Stop with `Ctrl+C`.
 
-Local mode uses `data/real-address-balances.sqlite` and performs no network lookups. For the final experiment this DB must contain all currently funded real Bitcoin addresses. The small CSV committed here is only a real-address seed, not the final all-address dataset.
+Local mode uses `data/blockchair_bitcoin_addresses_latest.tsv.gz` and performs no network lookups. This file should be the full Blockchair Bitcoin address dump with:
+
+```text
+address<TAB>balance
+```
+
+The small CSV committed here is only a real-address seed, not the final all-address dataset.
 
 The runner refuses small address DBs by default. For explicit seed testing only:
 
@@ -64,6 +70,14 @@ Build the simple address DB from the human-verifiable CSV:
 ```bash
 npm run address-db:build -- --input data/real-address-balances.csv --db data/real-address-balances.sqlite
 ```
+
+Download the full trusted public dump manually if the direct download is slow:
+
+```bash
+curl -fL https://gz.blockchair.com/bitcoin/addresses/blockchair_bitcoin_addresses_latest.tsv.gz -o data/blockchair_bitcoin_addresses_latest.tsv.gz
+```
+
+The dump is large and should not be committed to normal GitHub repos.
 
 Benchmark local lookup:
 

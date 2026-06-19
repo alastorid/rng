@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "start": "node src/rng-poc.mjs",
-    "start:local": "node src/rng-poc.mjs --address-db data/real-address-balances.sqlite --store-hit-keys-plain",
+    "start:local": "node src/rng-poc.mjs --address-dump data/blockchair_bitcoin_addresses_latest.tsv.gz --store-hit-keys-plain",
     "smoke": "node src/rng-poc.mjs --samples 2 --dry-run",
     "dataset:sample": "node src/dataset-sample.mjs",
     "dataset:build": "node src/dataset-build.mjs",
