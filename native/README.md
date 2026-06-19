@@ -8,13 +8,15 @@ Current runnable backend:
 Go CPU backend
 ```
 
-Planned backend:
+Required next backend:
 
 ```text
 OpenCL GPU backend
 ```
 
 The CPU backend is intentionally first. It gives us a native correctness reference before GPU kernels are added.
+
+Important: current `native-latest` binaries are CPU-only. `--backend opencl` is not GPU acceleration yet.
 
 ## Run
 
@@ -40,7 +42,6 @@ For seed-file testing only:
 
 ```bash
 ./rng-native --list-devices
-./rng-native --backend opencl --platform 0 --device 0
 ```
 
 The OpenCL flags are reserved now. GPU kernels are not enabled in this first native release.

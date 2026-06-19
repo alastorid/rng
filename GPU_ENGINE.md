@@ -2,6 +2,8 @@
 
 Yes, this POC can be rewritten as a native cross-platform engine similar in shape to hashcat.
 
+Current status: the CI-built native binaries are CPU-only. The OpenCL backend is not implemented yet and must not be treated as acceleration until the secp256k1/hash kernels are wired into the runtime.
+
 The right architecture is:
 
 ```text
