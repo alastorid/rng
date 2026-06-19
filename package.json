@@ -1,0 +1,20 @@
+{
+  "name": "rng-bitcoin-poc",
+  "version": "0.1.0",
+  "description": "Pure RNG Bitcoin address sampling POC with append-only evidence logs.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/rng-poc.mjs",
+    "start:local": "node src/rng-poc.mjs --local-dataset data/address_dataset.bin --lookup-mode hashmap --store-hit-keys-plain",
+    "smoke": "node src/rng-poc.mjs --samples 2 --dry-run",
+    "dataset:sample": "node src/dataset-sample.mjs",
+    "dataset:build": "node src/dataset-build.mjs",
+    "dataset:lookup": "node src/dataset-lookup.mjs",
+    "dataset:bench": "node src/dataset-bench.mjs"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.9.7",
+    "@scure/base": "^1.2.6"
+  }
+}

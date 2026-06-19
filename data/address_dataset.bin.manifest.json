@@ -1,0 +1,41 @@
+{
+  "createdAt": "2026-06-19T20:59:03.483Z",
+  "input": "/Users/henry/Documents/house/rng-bitcoin-poc/data/sample-address_dataset.csv",
+  "output": "/Users/henry/Documents/house/rng-bitcoin-poc/data/address_dataset.bin",
+  "format": "sorted fixed-width binary records: 20-byte hash160 + uint64_be balance_sats",
+  "recordSizeBytes": 28,
+  "datasetSha256": "94f313932b65e940c6de8acfe92bb31c2d30bf42ba34fab5e5855a3442c2ce2b",
+  "datasetSize": {
+    "rawSizeBytes": 2800000,
+    "compressedEstimateBytes": "run gzip/zstd on final dataset; synthetic/sample data is misleading",
+    "ramRequirementBinaryLookupBytes": 2800000,
+    "ramRequirementHashMapApproxBytes": "8400000 to 14000000",
+    "ssdRequirementBytes": 2800000
+  },
+  "addressCount": 100000,
+  "totalBalanceSats": "5000867223212",
+  "maxBalanceSats": "99999693",
+  "largestHolders": {
+    "top10Count": 10,
+    "top100Count": 100,
+    "threshold_1_btc_count": 0,
+    "threshold_10_btc_count": 0,
+    "threshold_100_btc_count": 0
+  },
+  "balanceDistribution": {
+    "dust_to_9999_sats": 10,
+    "10k_to_99k_sats": 95,
+    "100k_to_999k_sats": 904,
+    "0_01_to_0_099_btc": 8933,
+    "0_1_to_0_999_btc": 90058,
+    "1_to_9_999_btc": 0,
+    "10_to_99_999_btc": 0,
+    "100_plus_btc": 0
+  },
+  "host": {
+    "platform": "darwin",
+    "release": "25.5.0",
+    "arch": "arm64",
+    "node": "v26.0.0"
+  }
+}
