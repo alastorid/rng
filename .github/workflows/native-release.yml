@@ -1,0 +1,103 @@
+name: Native Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple Silicon
+            runner: macos-14
+            goos: darwin
+            goarch: arm64
+            artifact: rng-native-darwin-arm64
+          - name: Windows x64
+            runner: windows-latest
+            goos: windows
+            goarch: amd64
+            artifact: rng-native-windows-amd64.exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+          cache-dependency-path: native/go.mod
+
+      - name: Download dependencies
+        working-directory: native
+        run: go mod download
+
+      - name: Test
+        working-directory: native
+        run: go test ./...
+
+      - name: Build
+        working-directory: native
+        shell: bash
+        run: |
+          mkdir -p dist
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 \
+            go build -trimpath -ldflags="-s -w" -o dist/${{ matrix.artifact }} ./cmd/rng-native
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: native/dist/${{ matrix.artifact }}
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir release
+          find artifacts -type f -maxdepth 2 -print -exec cp {} release/ \;
+          ls -la release
+
+      - name: Move rolling release tag
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f native-latest "${GITHUB_SHA}"
+          git push -f origin native-latest
+
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view native-latest >/dev/null 2>&1; then
+            gh release upload native-latest release/* --clobber
+          else
+            gh release create native-latest release/* \
+              --title "Native Latest" \
+              --notes "Automated native builds from main." \
+              --prerelease
+          fi

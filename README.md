@@ -98,6 +98,27 @@ For low-storage full-real generation, use a pruned Bitcoin Core node; see [BITCO
 
 For a future native/OpenCL engine, see [GPU_ENGINE.md](GPU_ENGINE.md).
 
+## Native CI Binaries
+
+GitHub Actions builds release assets automatically:
+
+- `rng-native-darwin-arm64` for macOS Apple Silicon
+- `rng-native-windows-amd64.exe` for Windows x64
+
+Download them from the `native-latest` prerelease on GitHub.
+
+macOS:
+
+```bash
+./rng-native-darwin-arm64 --address-dump data/blockchair_bitcoin_addresses_latest.tsv.gz --continuous --delay-ms 0
+```
+
+Windows:
+
+```powershell
+.\rng-native-windows-amd64.exe --address-dump data\blockchair_bitcoin_addresses_latest.tsv.gz --continuous --delay-ms 0
+```
+
 ## Optional Remote API Mode
 
 Remote mode is still available for quick comparison, but it is not the preferred experiment path:
