@@ -52,6 +52,12 @@ Lookup one hash:
 npm run dataset:lookup -- --dataset data/address_dataset.bin --hash160 00112233445566778899aabbccddeeff00112233 --mode hashmap
 ```
 
+Export public addresses for manual block explorer checks:
+
+```bash
+npm run dataset:export-addresses -- --dataset data/address_dataset.bin --out data/address_balances.csv
+```
+
 Benchmark:
 
 ```bash

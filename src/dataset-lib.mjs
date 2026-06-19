@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { bech32 } from '@scure/base';
 
 export const RECORD_SIZE = 28;
 export const HASH160_SIZE = 20;
@@ -20,6 +21,7 @@ export function parseArgs(argv, defaults = {}) {
     if (arg === '--input') args.input = needValue();
     else if (arg === '--out') args.out = needValue();
     else if (arg === '--dataset') args.dataset = needValue();
+    else if (arg === '--network') args.network = needValue();
     else if (arg === '--hash160') args.hash160 = needValue();
     else if (arg === '--lookups') args.lookups = Number.parseInt(needValue(), 10);
     else if (arg === '--count') args.count = Number.parseInt(needValue(), 10);
@@ -182,4 +184,44 @@ export function writeManifest(file, manifest) {
 
 export function ensureDirFor(file) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
+}
+
+export function sha256(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest();
+}
+
+export function base58check(version, payload) {
+  const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const body = Buffer.concat([Buffer.from([version]), payload]);
+  const checksum = sha256(sha256(body)).subarray(0, 4);
+  const data = Buffer.concat([body, checksum]);
+  let value = BigInt(`0x${data.toString('hex')}`);
+  let out = '';
+  while (value > 0n) {
+    const mod = value % 58n;
+    out = alphabet[Number(mod)] + out;
+    value /= 58n;
+  }
+  for (const byte of data) {
+    if (byte === 0) out = '1' + out;
+    else break;
+  }
+  return out;
+}
+
+export function hash160ToAddresses(hash160, network = 'mainnet') {
+  const normalized = normalizeHash160(hash160);
+  const payload = Buffer.from(normalized, 'hex');
+  const p2pkhVersion = network === 'mainnet' ? 0x00 : 0x6f;
+  const hrp = network === 'mainnet' ? 'bc' : 'tb';
+  return [
+    {
+      addressType: 'p2pkh',
+      address: base58check(p2pkhVersion, payload)
+    },
+    {
+      addressType: 'p2wpkh',
+      address: bech32.encode(hrp, [0, ...bech32.toWords(payload)])
+    }
+  ];
 }

@@ -11,6 +11,7 @@
     "dataset:sample": "node src/dataset-sample.mjs",
     "dataset:build": "node src/dataset-build.mjs",
     "dataset:lookup": "node src/dataset-lookup.mjs",
+    "dataset:export-addresses": "node src/dataset-export-addresses.mjs",
     "dataset:bench": "node src/dataset-bench.mjs"
   },
   "dependencies": {

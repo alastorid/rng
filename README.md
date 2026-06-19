@@ -54,6 +54,12 @@ npm run dataset:bench -- --dataset data/address_dataset.bin --lookups 100000 --m
 npm run dataset:bench -- --dataset data/address_dataset.bin --lookups 100000 --mode binary
 ```
 
+Export public addresses for manual checks:
+
+```bash
+npm run dataset:export-addresses -- --dataset data/address_dataset.bin --out data/address_balances.csv
+```
+
 See [DATASET.md](DATASET.md) for the dataset format and Bitcoin Core acquisition plan.
 
 ## Optional Remote API Mode
