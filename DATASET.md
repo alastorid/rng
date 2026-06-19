@@ -58,6 +58,14 @@ Export public addresses for manual block explorer checks:
 npm run dataset:export-addresses -- --dataset data/address_dataset.bin --out data/address_balances.csv
 ```
 
+Import real public addresses, including 32-byte P2WSH/P2TR script keys:
+
+```bash
+npm run dataset:import-addresses -- --input data/real-addresses.csv --out data/real-script_dataset.csv
+```
+
+The real address CSV includes public address, script type, script key, sats, BTC amount, explorer URL, and source metadata.
+
 Benchmark:
 
 ```bash

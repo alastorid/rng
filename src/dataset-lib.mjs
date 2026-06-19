@@ -22,6 +22,7 @@ export function parseArgs(argv, defaults = {}) {
     else if (arg === '--out') args.out = needValue();
     else if (arg === '--dataset') args.dataset = needValue();
     else if (arg === '--network') args.network = needValue();
+    else if (arg === '--addresses') args.addresses = needValue();
     else if (arg === '--hash160') args.hash160 = needValue();
     else if (arg === '--lookups') args.lookups = Number.parseInt(needValue(), 10);
     else if (arg === '--count') args.count = Number.parseInt(needValue(), 10);
@@ -224,4 +225,37 @@ export function hash160ToAddresses(hash160, network = 'mainnet') {
       address: bech32.encode(hrp, [0, ...bech32.toWords(payload)])
     }
   ];
+}
+
+export function bech32ScriptKey(address) {
+  const decoded = bech32.decode(address.toLowerCase(), 1023);
+  const version = decoded.words[0];
+  const program = Buffer.from(bech32.fromWords(decoded.words.slice(1)));
+  if (decoded.prefix === 'bc' && version === 0 && program.length === 20) {
+    return { network: 'mainnet', addressType: 'p2wpkh', scriptKey: program.toString('hex') };
+  }
+  if (decoded.prefix === 'bc' && version === 0 && program.length === 32) {
+    return { network: 'mainnet', addressType: 'p2wsh', scriptKey: program.toString('hex') };
+  }
+  if (decoded.prefix === 'bc' && version === 1 && program.length === 32) {
+    return { network: 'mainnet', addressType: 'p2tr', scriptKey: program.toString('hex') };
+  }
+  if (decoded.prefix === 'tb' && version === 0 && program.length === 20) {
+    return { network: 'testnet', addressType: 'p2wpkh', scriptKey: program.toString('hex') };
+  }
+  if (decoded.prefix === 'tb' && version === 0 && program.length === 32) {
+    return { network: 'testnet', addressType: 'p2wsh', scriptKey: program.toString('hex') };
+  }
+  if (decoded.prefix === 'tb' && version === 1 && program.length === 32) {
+    return { network: 'testnet', addressType: 'p2tr', scriptKey: program.toString('hex') };
+  }
+  throw new Error(`Unsupported bech32 witness program for ${address}`);
+}
+
+export function decodeAddressScriptKey(address) {
+  const clean = address.trim();
+  if (/^(bc1|tb1)/i.test(clean)) {
+    return bech32ScriptKey(clean);
+  }
+  throw new Error(`Unsupported address format for importer: ${address}`);
 }
