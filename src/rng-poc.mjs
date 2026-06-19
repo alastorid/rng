@@ -5,12 +5,14 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import {
   binaryLookup,
   fileSha256,
   hashMapLookup,
-  loadHashMap
+  loadHashMap,
+  parseBalance
 } from './dataset-lib.mjs';
 
 const CURVE_N = BigInt('0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141');
@@ -36,6 +38,12 @@ Options:
                             Select chain API and address prefixes. Default: mainnet
   --api-base <url>          Override chain API. Default: Blockstream public API
   --local-dataset <path>    Use local binary hash160 dataset and do no network checks.
+  --real-script-dataset <path>
+                            Use real script-key CSV dataset and do no network checks.
+  --address-db <path>       Use simple SQLite address->balance DB and do no network checks.
+  --min-address-db-records <n>
+                            Refuse small address DBs. Default: 1000000
+  --allow-small-db          Allow seed/test address DBs below the minimum.
   --lookup-mode <mode>      Local lookup mode: hashmap or binary. Default: hashmap
   --log-dir <path>          Directory for append-only logs. Default: ./logs
   --dry-run                 Derive addresses and log samples without chain API calls.
@@ -58,6 +66,10 @@ function parseArgs(argv) {
     network: 'mainnet',
     apiBase: null,
     localDataset: null,
+    realScriptDataset: null,
+    addressDb: null,
+    minAddressDbRecords: 1_000_000,
+    allowSmallDb: false,
     lookupMode: 'hashmap',
     logDir: DEFAULT_LOG_DIR,
     dryRun: false,
@@ -80,6 +92,10 @@ function parseArgs(argv) {
     else if (arg === '--network') args.network = needValue();
     else if (arg === '--api-base') args.apiBase = needValue().replace(/\/+$/, '');
     else if (arg === '--local-dataset') args.localDataset = path.resolve(needValue());
+    else if (arg === '--real-script-dataset') args.realScriptDataset = path.resolve(needValue());
+    else if (arg === '--address-db') args.addressDb = path.resolve(needValue());
+    else if (arg === '--min-address-db-records') args.minAddressDbRecords = Number.parseInt(needValue(), 10);
+    else if (arg === '--allow-small-db') args.allowSmallDb = true;
     else if (arg === '--lookup-mode') args.lookupMode = needValue();
     else if (arg === '--log-dir') args.logDir = path.resolve(needValue());
     else if (arg === '--dry-run') args.dryRun = true;
@@ -104,6 +120,13 @@ function parseArgs(argv) {
   }
   if (!['hashmap', 'binary'].includes(args.lookupMode)) {
     throw new Error('--lookup-mode must be hashmap or binary');
+  }
+  const localModes = [args.localDataset, args.realScriptDataset, args.addressDb].filter(Boolean).length;
+  if (localModes > 1) {
+    throw new Error('Use only one local lookup mode: --local-dataset, --real-script-dataset, or --address-db');
+  }
+  if (!Number.isSafeInteger(args.minAddressDbRecords) || args.minAddressDbRecords < 1) {
+    throw new Error('--min-address-db-records must be a positive integer');
   }
 
   args.apiBase ??= args.network === 'testnet' ? DEFAULT_TESTNET_API : DEFAULT_API;
@@ -247,6 +270,69 @@ function localAddressState(lookupResult) {
   };
 }
 
+function scriptDatasetState(record) {
+  const exists = Boolean(record);
+  const balanceSats = record?.balanceSats ?? 0n;
+  return {
+    source: 'real-script-dataset',
+    txCount: null,
+    fundedSats: null,
+    spentSats: null,
+    balanceSats: balanceSats.toString(),
+    appearedOnChain: exists,
+    hasHistory: exists,
+    hasBalance: balanceSats > 0n,
+    datasetAddress: record?.address ?? null,
+    datasetAddressType: record?.addressType ?? null,
+    datasetSource: record?.source ?? null
+  };
+}
+
+function addressDbState(record) {
+  const exists = Boolean(record);
+  const balanceSats = record ? BigInt(record.balance_sats) : 0n;
+  return {
+    source: 'local-real-address-db',
+    txCount: null,
+    fundedSats: null,
+    spentSats: null,
+    balanceSats: balanceSats.toString(),
+    balanceBtc: record?.balance_btc ?? null,
+    appearedOnChain: exists,
+    hasHistory: exists,
+    hasBalance: balanceSats > 0n,
+    datasetAddress: record?.address ?? null,
+    explorerUrl: record?.explorer_url ?? null,
+    datasetSource: record?.source ?? null
+  };
+}
+
+function loadScriptDataset(file) {
+  const text = fs.readFileSync(file, 'utf8');
+  const map = new Map();
+  let lineNo = 0;
+  for (const line of text.split(/\r?\n/)) {
+    lineNo += 1;
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    if (lineNo === 1 && trimmed.toLowerCase().startsWith('script_key,address_type')) continue;
+    const [scriptKey, addressType, address, balanceRaw, balanceBtcOrSource, explorerOrSource, maybeSource] = trimmed.split(',');
+    if (!scriptKey || !addressType || !address || !balanceRaw) {
+      throw new Error(`Invalid real script dataset line ${lineNo}: ${line}`);
+    }
+    const source = maybeSource ?? explorerOrSource ?? balanceBtcOrSource ?? 'unknown';
+    const record = {
+      scriptKey: scriptKey.toLowerCase(),
+      addressType,
+      address,
+      balanceSats: parseBalance(balanceRaw),
+      source
+    };
+    map.set(`${record.addressType}:${record.scriptKey}`, record);
+  }
+  return map;
+}
+
 function appendJsonl(file, object) {
   fs.appendFileSync(file, `${JSON.stringify(object)}\n`);
 }
@@ -274,6 +360,10 @@ async function main() {
   let stopRequested = false;
   let localDataset = null;
   let localDatasetMap = null;
+  let realScriptDatasetMap = null;
+  let addressDb = null;
+  let addressDbLookup = null;
+  let addressDbRecords = 0;
 
   if (args.localDataset) {
     localDataset = fs.readFileSync(args.localDataset);
@@ -281,19 +371,59 @@ async function main() {
       localDatasetMap = loadHashMap(localDataset);
     }
   }
+  if (args.realScriptDataset) {
+    realScriptDatasetMap = loadScriptDataset(args.realScriptDataset);
+  }
+  if (args.addressDb) {
+    addressDb = new DatabaseSync(args.addressDb, { readOnly: true });
+    addressDbRecords = addressDb.prepare('SELECT COUNT(*) AS count FROM address_balances').get().count;
+    if (!args.allowSmallDb && addressDbRecords < args.minAddressDbRecords) {
+      throw new Error(
+        `Address DB has only ${addressDbRecords} rows. Refusing to treat it as a full real dataset. ` +
+        `Build the all-address DB first, or pass --allow-small-db for explicit seed/testing runs.`
+      );
+    }
+    addressDbLookup = addressDb.prepare(`
+      SELECT address, balance_sats, balance_btc, explorer_url, source
+      FROM address_balances
+      WHERE address = ?
+    `);
+  }
 
   const manifest = {
     runId,
     startedAt: nowIso(),
     network: args.network,
-    mode: args.localDataset ? 'local-dataset' : args.dryRun ? 'dry-run' : 'remote-api',
-    apiBase: args.localDataset ? null : args.apiBase,
+    mode: args.realScriptDataset
+      ? 'real-script-dataset'
+      : args.addressDb
+        ? 'real-address-db'
+      : args.localDataset ? 'local-dataset' : args.dryRun ? 'dry-run' : 'remote-api',
+    apiBase: args.localDataset || args.realScriptDataset || args.addressDb ? null : args.apiBase,
     localDataset: args.localDataset
       ? {
           path: args.localDataset,
           sha256: fileSha256(args.localDataset),
           bytes: fs.statSync(args.localDataset).size,
           lookupMode: args.lookupMode
+      }
+      : null,
+    realScriptDataset: args.realScriptDataset
+      ? {
+          path: args.realScriptDataset,
+          sha256: fileSha256(args.realScriptDataset),
+          bytes: fs.statSync(args.realScriptDataset).size,
+          records: realScriptDatasetMap.size
+      }
+      : null,
+    addressDb: args.addressDb
+      ? {
+          path: args.addressDb,
+          sha256: fileSha256(args.addressDb),
+          bytes: fs.statSync(args.addressDb).size,
+          records: addressDbRecords,
+          minRequiredRecords: args.minAddressDbRecords,
+          allowSmallDb: args.allowSmallDb
         }
       : null,
     dryRun: args.dryRun,
@@ -334,7 +464,9 @@ async function main() {
     appearedOnChain: 0,
     hasHistory: 0,
     hasBalance: 0,
-    checkedHash160s: 0
+    checkedHash160s: 0,
+    checkedScriptKeys: 0,
+    checkedAddressDbRows: 0
   };
 
   console.log(`Run ${runId}`);
@@ -342,6 +474,8 @@ async function main() {
   console.log(`Samples:  ${samplesFile}`);
   console.log(`Hits:     ${hitsFile}`);
   if (args.localDataset) console.log(`Local dataset: ${args.localDataset} (${args.lookupMode})`);
+  if (args.realScriptDataset) console.log(`Real script dataset: ${args.realScriptDataset}`);
+  if (args.addressDb) console.log(`Real address DB: ${args.addressDb}`);
   if (vaultPass) console.log(`Encrypted hit-key vault: ${vaultFile}`);
 
   let index = 0;
@@ -383,7 +517,7 @@ async function main() {
       try {
         state = args.dryRun
           ? {
-              source: args.localDataset ? 'dry-run-local-dataset' : 'dry-run',
+              source: args.localDataset || args.realScriptDataset || args.addressDb ? 'dry-run-local-dataset' : 'dry-run',
               txCount: null,
               fundedSats: null,
               spentSats: null,
@@ -394,6 +528,10 @@ async function main() {
             }
           : args.localDataset
             ? localState
+          : args.realScriptDataset
+            ? scriptDatasetState(realScriptDatasetMap.get(`${candidate.type === 'p2pkh-compressed' ? 'p2pkh' : candidate.type}:${derived.pubKeyHashHex}`))
+          : args.addressDb
+            ? addressDbState(addressDbLookup.get(candidate.address))
           : await fetchAddressState(args.apiBase, candidate.address);
       } catch (err) {
         stats.apiErrors += 1;
@@ -414,6 +552,8 @@ async function main() {
       if (state?.appearedOnChain) stats.appearedOnChain += 1;
       if (state?.hasHistory) stats.hasHistory += 1;
       if (state?.hasBalance) stats.hasBalance += 1;
+      if (args.realScriptDataset && !args.dryRun) stats.checkedScriptKeys += 1;
+      if (args.addressDb && !args.dryRun) stats.checkedAddressDbRows += 1;
 
       if (state?.appearedOnChain || state?.hasHistory || state?.hasBalance) {
         const hitRecord = {

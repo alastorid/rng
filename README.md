@@ -36,7 +36,13 @@ npm run start:local -- --continuous --delay-ms 0
 
 Stop with `Ctrl+C`.
 
-Local mode uses `data/address_dataset.bin` and performs no network lookups. Each RNG key derives one compressed public-key hash160 and checks it locally. The two display addresses, P2PKH and P2WPKH, share that same hash160.
+Local mode uses `data/real-address-balances.sqlite` and performs no network lookups. For the final experiment this DB must contain all currently funded real Bitcoin addresses. The small CSV committed here is only a real-address seed, not the final all-address dataset.
+
+The runner refuses small address DBs by default. For explicit seed testing only:
+
+```bash
+npm run start:local -- --samples 10 --delay-ms 0 --allow-small-db
+```
 
 ## Dataset Tools
 
@@ -45,6 +51,18 @@ Create or replace the sample dataset:
 ```bash
 npm run dataset:sample -- --count 100000 --out data/sample-address_dataset.csv
 npm run dataset:build -- --input data/sample-address_dataset.csv --out data/address_dataset.bin
+```
+
+Rebuild the real script dataset from real public addresses:
+
+```bash
+npm run dataset:import-addresses -- --input data/real-addresses.csv --out data/real-script_dataset.csv
+```
+
+Build the simple address DB from the human-verifiable CSV:
+
+```bash
+npm run address-db:build -- --input data/real-address-balances.csv --db data/real-address-balances.sqlite
 ```
 
 Benchmark local lookup:
@@ -61,6 +79,8 @@ npm run dataset:export-addresses -- --dataset data/address_dataset.bin --out dat
 ```
 
 See [DATASET.md](DATASET.md) for the dataset format and Bitcoin Core acquisition plan.
+
+For low-storage full-real generation, use a pruned Bitcoin Core node; see [BITCOIN_CORE_PRUNED.md](BITCOIN_CORE_PRUNED.md).
 
 ## Optional Remote API Mode
 

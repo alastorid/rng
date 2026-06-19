@@ -1,14 +1,16 @@
 {
-  "createdAt": "2026-06-19T21:18:25.274Z",
+  "createdAt": "2026-06-19T21:21:34.859Z",
   "input": "/Users/henry/Documents/house/rng-bitcoin-poc/data/real-addresses.csv",
   "output": "/Users/henry/Documents/house/rng-bitcoin-poc/data/real-script_dataset.csv",
-  "recordCount": 1,
+  "recordCount": 2,
   "supportedAddressTypes": [
+    "p2pkh",
+    "p2sh",
     "p2wpkh",
     "p2wsh",
     "p2tr"
   ],
-  "note": "Real public-address dataset. P2WSH/P2TR use 32-byte script keys, not hash160.",
+  "note": "Real public-address dataset. P2PKH/P2SH/P2WPKH use 20-byte script keys; P2WSH/P2TR use 32-byte script keys.",
   "host": {
     "platform": "darwin",
     "release": "25.5.0",

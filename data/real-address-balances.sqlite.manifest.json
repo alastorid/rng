@@ -1,0 +1,15 @@
+{
+  "createdAt": "2026-06-19T21:25:55.758Z",
+  "input": "/Users/henry/Documents/house/rng-bitcoin-poc/data/real-address-balances.csv",
+  "output": "/Users/henry/Documents/house/rng-bitcoin-poc/data/real-address-balances.sqlite",
+  "format": "SQLite table address_balances(address primary key, balance_sats, balance_btc, explorer_url, source)",
+  "recordCount": 2,
+  "totalBalanceSats": "27115721168",
+  "maxBalanceSats": "21394460159",
+  "host": {
+    "platform": "darwin",
+    "release": "25.5.0",
+    "arch": "arm64",
+    "node": "v26.0.0"
+  }
+}

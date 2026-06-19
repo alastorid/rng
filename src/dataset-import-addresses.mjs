@@ -98,8 +98,8 @@ function main() {
     input,
     output: out,
     recordCount: rows.length,
-    supportedAddressTypes: ['p2wpkh', 'p2wsh', 'p2tr'],
-    note: 'Real public-address dataset. P2WSH/P2TR use 32-byte script keys, not hash160.'
+    supportedAddressTypes: ['p2pkh', 'p2sh', 'p2wpkh', 'p2wsh', 'p2tr'],
+    note: 'Real public-address dataset. P2PKH/P2SH/P2WPKH use 20-byte script keys; P2WSH/P2TR use 32-byte script keys.'
   });
   console.log(`Wrote ${rows.length} real script-key rows to ${out}`);
 }

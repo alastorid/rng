@@ -1,4 +1,6 @@
 node_modules/
+*.sqlite-shm
+*.sqlite-wal
 logs/*.jsonl
 logs/*.json
 logs/*.enc.jsonl

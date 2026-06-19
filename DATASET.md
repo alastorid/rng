@@ -58,7 +58,7 @@ Export public addresses for manual block explorer checks:
 npm run dataset:export-addresses -- --dataset data/address_dataset.bin --out data/address_balances.csv
 ```
 
-Import real public addresses, including 32-byte P2WSH/P2TR script keys:
+Import real public addresses, including P2PKH/P2SH/P2WPKH and 32-byte P2WSH/P2TR script keys:
 
 ```bash
 npm run dataset:import-addresses -- --input data/real-addresses.csv --out data/real-script_dataset.csv
@@ -101,10 +101,10 @@ Best source of truth for this project.
 
 Bitcoin Core exposes `dumptxoutset`, which writes a serialized UTXO set snapshot to disk, and reports `coins_written`, `base_hash`, `base_height`, `txoutset_hash`, and chain transaction count. That snapshot is the right primitive because we only need current unspent outputs, not full address history.
 
-Recommended extraction pipeline:
+Recommended extraction pipeline for low-storage machines:
 
 ```text
-Bitcoin Core fully synced
+Bitcoin Core pruned node fully synced
   -> bitcoin-cli dumptxoutset utxo.dat
   -> parse UTXO records
   -> decode scriptPubKey
@@ -119,7 +119,7 @@ Bitcoin Core fully synced
 
 For the requested `hash160,balance_sats` dataset, P2PKH and P2WPKH are direct 20-byte keys. P2SH is also 20 bytes but identifies a script hash, not a public-key hash. Taproot is 32 bytes, so production should either use a `script_key,balance_sats,type` schema or maintain separate datasets per script type.
 
-Verdict: recommended for canonical dataset generation.
+Verdict: recommended for canonical dataset generation. This does not require TB-scale archival storage; a pruned node keeps the current validated UTXO set.
 
 ### Option B: Existing Indexers
 
@@ -144,6 +144,51 @@ Fulcrum:
 - Not the simplest path for producing a compact fixed dataset.
 
 Verdict: indexers are useful for validation and local API service, but Bitcoin Core UTXO snapshot parsing is the cleaner path for this phase.
+
+## Full Real Dataset Build
+
+The seed CSVs in this repo are not the final experiment dataset. The real full dataset must be generated from a synced Bitcoin Core node.
+
+For machines without TB storage, use pruned Bitcoin Core. See [BITCOIN_CORE_PRUNED.md](BITCOIN_CORE_PRUNED.md).
+
+Preferred full-data pipeline:
+
+```bash
+bitcoin-cli getblockchaininfo
+bitcoin-cli gettxoutsetinfo
+bitcoin-cli dumptxoutset /path/to/utxo.dat
+```
+
+Then parse `utxo.dat` into `data/real-script_dataset.csv`.
+
+Fallback/debug pipeline:
+
+This repo also includes a full block scanner that maintains the current unspent set in SQLite:
+
+```bash
+npm run utxo:sync -- --db data/bitcoin-utxo.sqlite --bitcoin-cli bitcoin-cli
+npm run utxo:export -- --db data/bitcoin-utxo.sqlite --out data/real-script_dataset.csv
+```
+
+Then run the RNG POC completely offline against the exported full dataset:
+
+```bash
+npm run start:local -- --continuous --delay-ms 0
+```
+
+The pipeline is:
+
+```text
+Bitcoin Core full node
+  -> scan every block
+  -> delete spent outpoints
+  -> store current unspent outputs in SQLite
+  -> aggregate by script_key + address_type
+  -> data/real-script_dataset.csv
+  -> RNG local lookup
+```
+
+This fallback scanner is not suitable for pruned nodes starting from height 0, because old blocks are no longer available. It is slower than parsing `dumptxoutset` directly, but it is transparent, resumable, and useful for archival nodes or small-chain tests.
 
 ## Real Dataset Storage Estimates
 

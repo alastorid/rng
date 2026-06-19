@@ -23,6 +23,12 @@ export function parseArgs(argv, defaults = {}) {
     else if (arg === '--dataset') args.dataset = needValue();
     else if (arg === '--network') args.network = needValue();
     else if (arg === '--addresses') args.addresses = needValue();
+    else if (arg === '--db') args.db = needValue();
+    else if (arg === '--address-db') args.addressDb = needValue();
+    else if (arg === '--bitcoin-cli') args.bitcoinCli = needValue();
+    else if (arg === '--from-height') args.fromHeight = Number.parseInt(needValue(), 10);
+    else if (arg === '--to-height') args.toHeight = Number.parseInt(needValue(), 10);
+    else if (arg === '--batch-blocks') args.batchBlocks = Number.parseInt(needValue(), 10);
     else if (arg === '--hash160') args.hash160 = needValue();
     else if (arg === '--lookups') args.lookups = Number.parseInt(needValue(), 10);
     else if (arg === '--count') args.count = Number.parseInt(needValue(), 10);
@@ -210,6 +216,36 @@ export function base58check(version, payload) {
   return out;
 }
 
+export function base58checkDecode(address) {
+  const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  let value = 0n;
+  for (const char of address) {
+    const index = alphabet.indexOf(char);
+    if (index === -1) throw new Error(`Invalid base58 character in ${address}`);
+    value = value * 58n + BigInt(index);
+  }
+  let hex = value.toString(16);
+  if (hex.length % 2) hex = `0${hex}`;
+  let data = Buffer.from(hex, 'hex');
+  let leadingZeroes = 0;
+  for (const char of address) {
+    if (char === '1') leadingZeroes += 1;
+    else break;
+  }
+  if (leadingZeroes > 0) {
+    data = Buffer.concat([Buffer.alloc(leadingZeroes), data]);
+  }
+  if (data.length < 5) throw new Error(`Invalid base58check length for ${address}`);
+  const body = data.subarray(0, -4);
+  const checksum = data.subarray(-4);
+  const expected = sha256(sha256(body)).subarray(0, 4);
+  if (!checksum.equals(expected)) throw new Error(`Invalid base58check checksum for ${address}`);
+  return {
+    version: body[0],
+    payload: body.subarray(1)
+  };
+}
+
 export function hash160ToAddresses(hash160, network = 'mainnet') {
   const normalized = normalizeHash160(hash160);
   const payload = Buffer.from(normalized, 'hex');
@@ -256,6 +292,22 @@ export function decodeAddressScriptKey(address) {
   const clean = address.trim();
   if (/^(bc1|tb1)/i.test(clean)) {
     return bech32ScriptKey(clean);
+  }
+  const decoded = base58checkDecode(clean);
+  if (decoded.payload.length !== 20) {
+    throw new Error(`Unsupported base58 payload length for ${address}`);
+  }
+  if (decoded.version === 0x00) {
+    return { network: 'mainnet', addressType: 'p2pkh', scriptKey: decoded.payload.toString('hex') };
+  }
+  if (decoded.version === 0x05) {
+    return { network: 'mainnet', addressType: 'p2sh', scriptKey: decoded.payload.toString('hex') };
+  }
+  if (decoded.version === 0x6f) {
+    return { network: 'testnet', addressType: 'p2pkh', scriptKey: decoded.payload.toString('hex') };
+  }
+  if (decoded.version === 0xc4) {
+    return { network: 'testnet', addressType: 'p2sh', scriptKey: decoded.payload.toString('hex') };
   }
   throw new Error(`Unsupported address format for importer: ${address}`);
 }

@@ -6,13 +6,16 @@
   "private": true,
   "scripts": {
     "start": "node src/rng-poc.mjs",
-    "start:local": "node src/rng-poc.mjs --local-dataset data/address_dataset.bin --lookup-mode hashmap --store-hit-keys-plain",
+    "start:local": "node src/rng-poc.mjs --address-db data/real-address-balances.sqlite --store-hit-keys-plain",
     "smoke": "node src/rng-poc.mjs --samples 2 --dry-run",
     "dataset:sample": "node src/dataset-sample.mjs",
     "dataset:build": "node src/dataset-build.mjs",
     "dataset:lookup": "node src/dataset-lookup.mjs",
     "dataset:import-addresses": "node src/dataset-import-addresses.mjs",
     "dataset:export-addresses": "node src/dataset-export-addresses.mjs",
+    "address-db:build": "node src/address-db-build.mjs",
+    "utxo:sync": "node src/utxo-sync-bitcoin-core.mjs",
+    "utxo:export": "node src/utxo-export-sqlite.mjs",
     "dataset:bench": "node src/dataset-bench.mjs"
   },
   "dependencies": {
