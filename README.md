@@ -1,192 +1,135 @@
 # Pure RNG Bitcoin Address Sampling POC
 
-This is a local proof-of-concept runner for independent random trials:
+Native local POC for independent random trials:
 
 ```text
-OS entropy -> private key -> public key -> hash160 -> local dataset lookup -> evidence log
+OS entropy -> private key -> public Bitcoin address -> local real address dump lookup -> evidence log
 ```
 
-The program does not include transaction creation or spending logic. By default it logs public evidence plus a salted commitment to the private key, not the raw private key itself.
+The main POC uses CI-built native binaries. No npm is required to run it.
 
-## Install
+## Downloaded Dataset
 
-```bash
-npm install
-```
-
-## Quick Smoke Test
-
-```bash
-npm run smoke
-```
-
-This derives two random keys and writes local logs without calling a chain API.
-
-## Run Local Dataset Sampling
-
-```bash
-npm run start:local -- --samples 100 --delay-ms 0
-```
-
-For a long run:
-
-```bash
-npm run start:local -- --continuous --delay-ms 0
-```
-
-Stop with `Ctrl+C`.
-
-Local mode uses `data/blockchair_bitcoin_addresses_latest.tsv.gz` and performs no network lookups. This file should be the full Blockchair Bitcoin address dump with:
+The real lookup source is Blockchair's Bitcoin funded-address dump:
 
 ```text
 address<TAB>balance
 ```
 
-The small CSV committed here is only a real-address seed, not the final all-address dataset.
+Expected local path:
 
-The runner refuses small address DBs by default. For explicit seed testing only:
-
-```bash
-npm run start:local -- --samples 10 --delay-ms 0 --allow-small-db
+```text
+data/blockchair_bitcoin_addresses_latest.tsv.gz
 ```
 
-## Dataset Tools
+This file is large and is intentionally not committed to git.
 
-Create or replace the sample dataset:
-
-```bash
-npm run dataset:sample -- --count 100000 --out data/sample-address_dataset.csv
-npm run dataset:build -- --input data/sample-address_dataset.csv --out data/address_dataset.bin
-```
-
-Rebuild the real script dataset from real public addresses:
+## Run On macOS Apple Silicon
 
 ```bash
-npm run dataset:import-addresses -- --input data/real-addresses.csv --out data/real-script_dataset.csv
+./run.sh
 ```
 
-Build the simple address DB from the human-verifiable CSV:
+`run.sh` downloads:
+
+- `rng-native-darwin-arm64` from the `native-latest` GitHub release
+- `blockchair_bitcoin_addresses_latest.tsv.gz` if it is not already present
+
+Then it runs continuously with local lookup only.
+
+If the GitHub repo is private, authenticate GitHub CLI first:
 
 ```bash
-npm run address-db:build -- --input data/real-address-balances.csv --db data/real-address-balances.sqlite
+gh auth login
 ```
 
-Download the full trusted public dump manually if the direct download is slow:
+## Run On Windows
 
-```bash
-curl -fL https://gz.blockchair.com/bitcoin/addresses/blockchair_bitcoin_addresses_latest.tsv.gz -o data/blockchair_bitcoin_addresses_latest.tsv.gz
+From PowerShell:
+
+```powershell
+.\run.ps1
 ```
 
-The dump is large and should not be committed to normal GitHub repos.
+`run.ps1` downloads:
 
-Benchmark local lookup:
+- `rng-native-windows-amd64.exe`
+- `blockchair_bitcoin_addresses_latest.tsv.gz`
 
-```bash
-npm run dataset:bench -- --dataset data/address_dataset.bin --lookups 100000 --mode hashmap
-npm run dataset:bench -- --dataset data/address_dataset.bin --lookups 100000 --mode binary
+Then it runs continuously with local lookup only.
+
+If the GitHub repo is private, authenticate GitHub CLI first:
+
+```powershell
+gh auth login
 ```
 
-Export public addresses for manual checks:
+## Native Release Binaries
 
-```bash
-npm run dataset:export-addresses -- --dataset data/address_dataset.bin --out data/address_balances.csv
-```
-
-See [DATASET.md](DATASET.md) for the dataset format and Bitcoin Core acquisition plan.
-
-For low-storage full-real generation, use a pruned Bitcoin Core node; see [BITCOIN_CORE_PRUNED.md](BITCOIN_CORE_PRUNED.md).
-
-For a future native/OpenCL engine, see [GPU_ENGINE.md](GPU_ENGINE.md).
-
-## Native CI Binaries
-
-GitHub Actions builds release assets automatically:
+GitHub Actions builds and publishes:
 
 - `rng-native-darwin-arm64` for macOS Apple Silicon
 - `rng-native-windows-amd64.exe` for Windows x64
 
-Download them from the `native-latest` prerelease on GitHub.
-
-macOS:
-
-```bash
-./rng-native-darwin-arm64 --address-dump data/blockchair_bitcoin_addresses_latest.tsv.gz --continuous --delay-ms 0
-```
-
-Windows:
-
-```powershell
-.\rng-native-windows-amd64.exe --address-dump data\blockchair_bitcoin_addresses_latest.tsv.gz --continuous --delay-ms 0
-```
-
-## Optional Remote API Mode
-
-Remote mode is still available for quick comparison, but it is not the preferred experiment path:
-
-```bash
-npm start -- --samples 100 --delay-ms 500
-```
-
-## Optional Encrypted Hit Vault
-
-Routine logs intentionally do not store raw private keys. For the simplest possible proof file, store raw key material for hits only:
-
-```bash
-npm run start:local -- --continuous --delay-ms 0 --store-hit-keys-plain
-```
-
-If an address ever appears on-chain, this writes `logs/*.proof-hit-keys.jsonl` with:
-
-- private key hex
-- compressed WIF
-- derived address
-- chain state at detection time
-- the salted sample commitment
-
-For a more private preservation record, set a passphrase in an environment variable and pass its name:
-
-```bash
-export RNG_POC_VAULT_PASS='choose-a-long-local-passphrase'
-npm start -- --continuous --delay-ms 500 --vault-pass-env RNG_POC_VAULT_PASS
-```
-
-Only hit keys are encrypted into `logs/*.hit-keys.enc.jsonl`.
-
-## Evidence Files
-
-Every run writes:
-
-- `logs/<run-id>.manifest.json`: run settings, OS/Node metadata, salt for commitments, final stats.
-- `logs/<run-id>.samples.jsonl`: one append-only JSON record per sampled private key.
-- `logs/<run-id>.hits.jsonl`: addresses that appeared on-chain, had history, or had balance.
-- `logs/<run-id>.proof-hit-keys.jsonl`: optional plaintext proof material for hits only.
-- `logs/<run-id>.hit-keys.enc.jsonl`: optional encrypted key material for hits only.
-
-The private-key commitment is:
+Release:
 
 ```text
-sha256("rng-bitcoin-poc:v1:key-commitment" || runSalt || privateKey)
+https://github.com/alastorid/rng/releases/tag/native-latest
 ```
 
-That lets you later prove that a revealed key matches a specific sample without publishing raw key material during normal operation.
+Manual macOS command:
 
-## Address Formats Checked
+```bash
+./dist/rng-native-darwin-arm64 --address-dump data/blockchair_bitcoin_addresses_latest.tsv.gz --continuous --delay-ms 0
+```
 
-For each private key this checks:
+Manual Windows command:
 
-- compressed legacy P2PKH address
-- native SegWit P2WPKH address
+```powershell
+.\dist\rng-native-windows-amd64.exe --address-dump data\blockchair_bitcoin_addresses_latest.tsv.gz --continuous --delay-ms 0
+```
 
-## Interpretation
+## GPU Status
+
+Current native release:
+
+```text
+CPU backend
+```
+
+Required next backend:
+
+```text
+OpenCL GPU backend
+```
+
+The current binary is not GPU accelerated yet. See [GPU_ENGINE.md](GPU_ENGINE.md).
+
+## Seed Testing Only
+
+The committed seed CSV has only a few real addresses and is not the full experiment dataset.
+
+Use it only for tiny smoke tests:
+
+```bash
+./dist/rng-native-darwin-arm64 --address-dump data/real-address-balances.csv --samples 10 --allow-small-dump
+```
+
+Without `--allow-small-dump`, the native runner refuses small datasets.
+
+## Legacy Node Tools
+
+The old Node/npm scripts remain as reference and dataset utilities only. They are not the primary POC path anymore.
+
+## Evidence
+
+On a hit, the native runner writes JSONL proof records with:
+
+- generated address
+- address type
+- balance
+- dataset source and checksum
+- compressed public key
+- private key / WIF for the hit
 
 Expected result under modern cryptographic assumptions: zero funded collisions.
-
-If any hit appears, treat it first as an engineering incident to verify:
-
-- address derivation
-- RNG source
-- dataset snapshot
-- log integrity
-- independent reproduction on another machine or implementation
-
-Do not move funds from addresses you did not intentionally create.

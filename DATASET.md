@@ -1,212 +1,105 @@
-# Local Bitcoin Live Address Dataset POC
+# Real Address Balance Dataset
 
-Goal for this phase:
-
-```text
-Random hash160 -> local lookup -> exists? balance_sats?
-```
-
-This layer does not search private keys and does not optimize collision attempts. It only defines a fixed local dataset and a fast lookup path.
-
-## Dataset Contract
-
-Canonical import format:
-
-```csv
-hash160,balance_sats
-00112233445566778899aabbccddeeff00112233,150000
-aabbccddeeff0011223344556677889900112233,25000000
-```
-
-Build output:
+Primary dataset for the POC:
 
 ```text
-address_dataset.bin
+address<TAB>balance_sats
 ```
 
-Binary record format:
+Source:
 
 ```text
-20 bytes hash160 || 8 bytes uint64_be balance_sats
+https://gz.blockchair.com/bitcoin/addresses/blockchair_bitcoin_addresses_latest.tsv.gz
 ```
 
-Records are sorted by `hash160`. Zero-balance rows are dropped. Duplicate `hash160` rows are aggregated.
-
-## Commands
-
-Create a synthetic local sample:
-
-```bash
-npm run dataset:sample -- --count 100000 --out data/sample-address_dataset.csv
-```
-
-Build binary dataset:
-
-```bash
-npm run dataset:build -- --input data/sample-address_dataset.csv --out data/address_dataset.bin
-```
-
-Lookup one hash:
-
-```bash
-npm run dataset:lookup -- --dataset data/address_dataset.bin --hash160 00112233445566778899aabbccddeeff00112233 --mode hashmap
-```
-
-Export public addresses for manual block explorer checks:
-
-```bash
-npm run dataset:export-addresses -- --dataset data/address_dataset.bin --out data/address_balances.csv
-```
-
-Import real public addresses, including P2PKH/P2SH/P2WPKH and 32-byte P2WSH/P2TR script keys:
-
-```bash
-npm run dataset:import-addresses -- --input data/real-addresses.csv --out data/real-script_dataset.csv
-```
-
-The real address CSV includes public address, script type, script key, sats, BTC amount, explorer URL, and source metadata.
-
-Benchmark:
-
-```bash
-npm run dataset:bench -- --dataset data/address_dataset.bin --lookups 100000 --mode hashmap
-npm run dataset:bench -- --dataset data/address_dataset.bin --lookups 100000 --mode binary
-```
-
-## Engine Options
-
-HashMap mode:
-
-- O(1) average lookup.
-- Best for high-throughput RNG experiments.
-- Requires RAM for the whole dataset plus Map overhead.
-
-Binary mode:
-
-- O(log n) lookup over sorted fixed-width records.
-- Much lower implementation complexity.
-- Uses less memory than HashMap if later switched to mmap/native code.
-
-Recommended production path:
-
-- Bloom filter in RAM for fast negative checks.
-- LMDB/RocksDB or mmap sorted file as secondary lookup.
-- Keep `hash160`/script identifier as the key, not Base58/Bech32 strings.
-
-## Acquisition Evaluation
-
-### Option A: Bitcoin Core Full Node
-
-Best source of truth for this project.
-
-Bitcoin Core exposes `dumptxoutset`, which writes a serialized UTXO set snapshot to disk, and reports `coins_written`, `base_hash`, `base_height`, `txoutset_hash`, and chain transaction count. That snapshot is the right primitive because we only need current unspent outputs, not full address history.
-
-Recommended extraction pipeline for low-storage machines:
+Local path:
 
 ```text
-Bitcoin Core pruned node fully synced
-  -> bitcoin-cli dumptxoutset utxo.dat
-  -> parse UTXO records
-  -> decode scriptPubKey
-  -> extract key:
-       P2PKH: OP_DUP OP_HASH160 <20-byte hash160> OP_EQUALVERIFY OP_CHECKSIG
-       P2WPKH: OP_0 <20-byte hash160>
-       P2SH: OP_HASH160 <20-byte script hash> OP_EQUAL
-       P2TR: OP_1 <32-byte x-only pubkey>
-  -> aggregate balance by script identifier
-  -> write canonical CSV / binary dataset
+data/blockchair_bitcoin_addresses_latest.tsv.gz
 ```
 
-For the requested `hash160,balance_sats` dataset, P2PKH and P2WPKH are direct 20-byte keys. P2SH is also 20 bytes but identifies a script hash, not a public-key hash. Taproot is 32 bytes, so production should either use a `script_key,balance_sats,type` schema or maintain separate datasets per script type.
+This dump contains real Bitcoin addresses with current balances according to Blockchair's public dump. It is large and should not be committed to git.
 
-Verdict: recommended for canonical dataset generation. This does not require TB-scale archival storage; a pruned node keeps the current validated UTXO set.
+## Main POC Lookup
 
-### Option B: Existing Indexers
-
-Electrs:
-
-- Good for local wallet/address queries.
-- Uses a RocksDB-backed index.
-- Maintains transaction input/output indexes and supports fast balance queries.
-- Better as an online local service than as the canonical exporter unless we write a database walker.
-
-Esplora / esplora-electrs:
-
-- Good HTTP API and explorer stack.
-- More storage-heavy, built for explorer workloads.
-- Useful for validation and cross-checking.
-- Overkill if the only goal is `current script/address -> balance`.
-
-Fulcrum:
-
-- Fast Electrum-compatible server.
-- Good if we want a high-performance local Electrum query service.
-- Not the simplest path for producing a compact fixed dataset.
-
-Verdict: indexers are useful for validation and local API service, but Bitcoin Core UTXO snapshot parsing is the cleaner path for this phase.
-
-## Full Real Dataset Build
-
-The seed CSVs in this repo are not the final experiment dataset. The real full dataset must be generated from a synced Bitcoin Core node.
-
-For machines without TB storage, use pruned Bitcoin Core. See [BITCOIN_CORE_PRUNED.md](BITCOIN_CORE_PRUNED.md).
-
-Preferred full-data pipeline:
-
-```bash
-bitcoin-cli getblockchaininfo
-bitcoin-cli gettxoutsetinfo
-bitcoin-cli dumptxoutset /path/to/utxo.dat
-```
-
-Then parse `utxo.dat` into `data/real-script_dataset.csv`.
-
-Fallback/debug pipeline:
-
-This repo also includes a full block scanner that maintains the current unspent set in SQLite:
-
-```bash
-npm run utxo:sync -- --db data/bitcoin-utxo.sqlite --bitcoin-cli bitcoin-cli
-npm run utxo:export -- --db data/bitcoin-utxo.sqlite --out data/real-script_dataset.csv
-```
-
-Then run the RNG POC completely offline against the exported full dataset:
-
-```bash
-npm run start:local -- --continuous --delay-ms 0
-```
-
-The pipeline is:
+The native runner loads the dump and checks generated public addresses directly:
 
 ```text
-Bitcoin Core full node
-  -> scan every block
-  -> delete spent outpoints
-  -> store current unspent outputs in SQLite
-  -> aggregate by script_key + address_type
-  -> data/real-script_dataset.csv
-  -> RNG local lookup
+RNG private key
+  -> P2PKH address
+  -> P2WPKH address
+  -> local address dump lookup
+  -> balance?
 ```
 
-This fallback scanner is not suitable for pruned nodes starting from height 0, because old blocks are no longer available. It is slower than parsing `dumptxoutset` directly, but it is transparent, resumable, and useful for archival nodes or small-chain tests.
+Run via the repo script:
 
-## Real Dataset Storage Estimates
+```bash
+./run.sh
+```
 
-The exact real values must come from a synced node at snapshot time. The build manifest records the final counts and SHA-256.
+Windows:
 
-Fixed-width binary size:
+```powershell
+.\run.ps1
+```
+
+No npm is required for the main POC.
+
+## Human Verification
+
+The dump is human-checkable because the key is the public address itself.
+
+Example row:
 
 ```text
-P2PKH/P2WPKH/P2SH 20-byte key dataset: address_count * 28 bytes
-Taproot 32-byte key dataset: address_count * 40 bytes
+bc1qwzrryqr3ja8w7hnja2spmkgfdcgvqwp5swz4af4ngsjecfz0w0pqud7k38<TAB>21394460159
 ```
 
-Approximate examples:
+Manual explorer URL:
 
 ```text
-10M 20-byte records  -> 280 MB raw
-50M 20-byte records  -> 1.4 GB raw
-100M 20-byte records -> 2.8 GB raw
+https://blockstream.info/address/<address>
 ```
 
-HashMap RAM is usually several times raw binary size because of object/hash-table overhead. mmap or LMDB/RocksDB is better for very large datasets; HashMap is fastest if RAM is plentiful.
+## Dataset Safety
+
+The runner refuses small/partial dumps by default. This prevents accidentally treating a seed file as the full real dataset.
+
+Seed testing only:
+
+```bash
+./dist/rng-native-darwin-arm64 --address-dump data/real-address-balances.csv --samples 10 --allow-small-dump
+```
+
+## Storage
+
+Blockchair currently publishes this dump as a multi-GB gzip file. Loading it into memory requires enough RAM for:
+
+- compressed file on disk
+- decompressed line streaming
+- address map in memory
+
+The final long-running POC should run on the Windows server with more RAM/storage.
+
+The small Mac can be used for:
+
+- release binary smoke tests
+- seed-file tests
+- command validation
+
+## Legacy Utilities
+
+The older Node/npm dataset tools remain in the repository only as reference utilities. They are no longer the main POC path.
+
+## Alternative Source Of Truth
+
+For a self-verified dataset instead of a trusted public dump:
+
+```text
+pruned Bitcoin Core
+  -> current UTXO snapshot
+  -> address,balance export
+```
+
+See [BITCOIN_CORE_PRUNED.md](BITCOIN_CORE_PRUNED.md).

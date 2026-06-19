@@ -60,22 +60,22 @@ Then export the current UTXO set:
 bitcoin-cli dumptxoutset /path/to/utxo.dat
 ```
 
-The next implementation step is a parser for `utxo.dat` that writes:
+The next implementation step is a parser for `utxo.dat` that writes a native-runner-compatible address balance file:
 
 ```csv
-script_key,address_type,address,balance_sats,balance_btc,explorer_url,source
+address,balance_sats
 ```
 
 That output becomes:
 
 ```text
-data/real-script_dataset.csv
+data/blockchair_bitcoin_addresses_latest.tsv.gz
 ```
 
 Then the RNG POC runs completely offline:
 
 ```bash
-npm run start:local -- --continuous --delay-ms 0
+./dist/rng-native-darwin-arm64 --address-dump data/blockchair_bitcoin_addresses_latest.tsv.gz --continuous --delay-ms 0
 ```
 
 ## Why Not Third-Party Dumps?

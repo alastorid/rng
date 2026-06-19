@@ -1,4 +1,5 @@
 node_modules/
+dist/
 *.sqlite-shm
 *.sqlite-wal
 data/blockchair_bitcoin_addresses_*.tsv.gz
