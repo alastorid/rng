@@ -13,6 +13,14 @@ CLUnitTests/test.cl
 # Linux build results
 *.o
 
+# Runtime data and downloaded release assets
+.cache/
+dist/
+logs/
+data/blockchair_bitcoin_addresses_latest_extracted/
+data/blockchair_bitcoin_addresses_latest_targets.txt
+data/blockchair_bitcoin_addresses_latest_targets.txt.tmp
+
 # CUDA build results
 *.cuo
 

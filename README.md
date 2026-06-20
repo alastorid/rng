@@ -2,6 +2,35 @@
 
 A tool for brute-forcing Bitcoin private keys. The main purpose of this project is to contribute to the effort of solving the [Bitcoin puzzle transaction](https://blockchain.info/tx/08389f34c98c606322740c0be6a7125d9860bb8d5cb182c02f98461e5fa6cd15): A transaction with 32 addresses that become increasingly difficult to crack.
 
+### One-command run scripts
+
+`run.ps1` and `run.sh` prepare the runtime dataset from the `data` branch, download a prebuilt BitCrack binary from the `bitcrack-latest` release when one is not already present in `dist/`, convert the Blockchair dump into the address list BitCrack expects, and launch the fast CUDA/OpenCL engine.
+
+Windows defaults to CUDA:
+
+```
+.\run.ps1
+```
+
+Linux defaults to OpenCL:
+
+```
+./run.sh
+```
+
+Useful environment variables:
+
+```
+RNG_BACKEND=cuda|opencl
+RNG_RELEASE_TAG=bitcrack-latest
+RNG_KEYSPACE=START:END
+RNG_DEVICE=0
+RNG_BLOCKS=32
+RNG_THREADS=256
+RNG_POINTS=256
+RNG_BIN=/path/to/local/cuBitCrack-or-clBitCrack
+```
+
 
 ### Using BitCrack
 
