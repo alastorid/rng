@@ -6,6 +6,8 @@
 // Defined in bitcrack_cl.cpp which gets build in the pre-build event
 extern char _bitcrack_cl[];
 
+static const int BLOOM_HASHES = 4;
+
 typedef struct {
     int idx;
     bool compressed;
@@ -94,7 +96,8 @@ CLKeySearchDevice::~CLKeySearchDevice()
 
 uint64_t CLKeySearchDevice::getOptimalBloomFilterMask(double p, size_t n)
 {
-    double m = 3.6 * ceil((n * std::log(p)) / std::log(1 / std::pow(2, std::log(2))));
+    double targetBit = std::pow(p, 1.0 / (double)BLOOM_HASHES);
+    double m = std::ceil((-(double)BLOOM_HASHES * (double)n) / std::log(1.0 - targetBit));
 
     unsigned int bits = (unsigned int)std::ceil(std::log(m) / std::log(2));
 
@@ -116,7 +119,7 @@ void CLKeySearchDevice::initializeBloomFilter(const std::vector<struct hash160> 
         unsigned int hash[5];
         unsigned int h5 = 0;
 
-        uint64_t idx[5];
+        uint64_t idx[BLOOM_HASHES];
 
         undoRMD160FinalRound(targets[k].h, hash);
 
@@ -128,11 +131,10 @@ void CLKeySearchDevice::initializeBloomFilter(const std::vector<struct hash160> 
         idx[1] = ((hash[1] << 6) | ((h5 >> 6) & 0x3f)) & mask;
         idx[2] = ((hash[2] << 6) | ((h5 >> 12) & 0x3f)) & mask;
         idx[3] = ((hash[3] << 6) | ((h5 >> 18) & 0x3f)) & mask;
-        idx[4] = ((hash[4] << 6) | ((h5 >> 24) & 0x3f)) & mask;
 
-        for(int i = 0; i < 5; i++) {
+        for(int i = 0; i < BLOOM_HASHES; i++) {
             uint64_t j = idx[i];
-            buf[j / 32] |= 1 << (j % 32);
+            buf[j / 32] |= 1U << (j % 32);
         }
     }
 
@@ -321,6 +323,18 @@ void CLKeySearchDevice::setTargetsList()
 void CLKeySearchDevice::setBloomFilter()
 {
     uint64_t bloomFilterMask = getOptimalBloomFilterMask(1.0e-9, _targetList.size());
+    uint64_t maxBloomBytes = _globalMemSize / 4;
+
+    if(_globalMemSize > _pointsMemSize) {
+        maxBloomBytes = ((_globalMemSize - _pointsMemSize) * 3) / 4;
+    }
+
+    while(((bloomFilterMask + 1) / 8) > maxBloomBytes && bloomFilterMask > ((1ULL << 28) - 1)) {
+        bloomFilterMask = (bloomFilterMask >> 1);
+    }
+
+    Logger::log(LogLevel::Info, "OpenCL bloom filter: " + util::formatThousands((bloomFilterMask + 1) / 8)
+        + " bytes, " + util::format((uint32_t)BLOOM_HASHES) + " probes");
 
     initializeBloomFilter(_targetList, bloomFilterMask);
 }

@@ -1,6 +1,7 @@
 #define COMPRESSED 0
 #define UNCOMPRESSED 1
 #define BOTH 2
+#define BLOOM_HASHES 4
 
 unsigned int endian(unsigned int x)
 {
@@ -154,19 +155,18 @@ bool isInBloomFilter(unsigned int hash[5], __global unsigned int *targetList, ul
         h5 += hash[i];
     }
 
-    uint64_t idx[5];
+    ulong idx[BLOOM_HASHES];
 
     idx[0] = ((hash[0] << 6) | (h5 & 0x3f)) & mask;
     idx[1] = ((hash[1] << 6) | ((h5 >> 6) & 0x3f)) & mask;
     idx[2] = ((hash[2] << 6) | ((h5 >> 12) & 0x3f)) & mask;
     idx[3] = ((hash[3] << 6) | ((h5 >> 18) & 0x3f)) & mask;
-    idx[4] = ((hash[4] << 6) | ((h5 >> 24) & 0x3f)) & mask;
 
-    for(int i = 0; i < 5; i++) {
-        unsigned int j = idx[i];
+    for(int i = 0; i < BLOOM_HASHES; i++) {
+        ulong j = idx[i];
         unsigned int f = targetList[j / 32];
 
-        if((f & (0x01 << (j % 32))) == 0) {
+        if((f & (0x01 << (uint)(j % 32))) == 0) {
             foundMatch = false;
         }
     }
