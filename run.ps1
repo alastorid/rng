@@ -11,7 +11,7 @@ $Dump = "data\blockchair_bitcoin_addresses_latest.tsv.gz"
 if (-not (Test-Path $Bin)) {
     $gh = Get-Command gh -ErrorAction SilentlyContinue
     if ($gh) {
-        gh release download native-latest --repo alastorid/rng --pattern rng-native-windows-amd64.exe --dir dist --clobber
+        gh release download native-latest --repo github.com/alastorid/rng --pattern rng-native-windows-amd64.exe --dir dist --clobber
     }
     elseif ($env:GITHUB_TOKEN) {
         $release = Invoke-RestMethod `

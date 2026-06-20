@@ -16,7 +16,7 @@ DUMP="data/blockchair_bitcoin_addresses_latest.tsv.gz"
 
 if [[ ! -x "$BIN" ]]; then
   if command -v gh >/dev/null 2>&1; then
-    gh release download native-latest --repo alastorid/rng --pattern rng-native-darwin-arm64 --dir dist --clobber
+    gh release download native-latest --repo github.com/alastorid/rng --pattern rng-native-darwin-arm64 --dir dist --clobber
   elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
     ASSET_ID="$(
       curl -fsSL -H "Authorization: Bearer ${GITHUB_TOKEN}" \

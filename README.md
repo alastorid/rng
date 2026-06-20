@@ -40,7 +40,7 @@ Then it runs continuously with local lookup only.
 If the GitHub repo is private, authenticate GitHub CLI first:
 
 ```bash
-gh auth login
+gh auth login --hostname github.com
 ```
 
 ## Run On Windows
@@ -61,7 +61,7 @@ Then it runs continuously with local lookup only.
 If the GitHub repo is private, authenticate GitHub CLI first:
 
 ```powershell
-gh auth login
+gh auth login --hostname github.com
 ```
 
 ## Native Release Binaries
