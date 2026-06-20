@@ -206,7 +206,10 @@ void CLKeySearchDevice::init(const secp256k1::uint256 &start, int compression, c
         allocateBuffers();
 
         if(_rngMode) {
-            Logger::log(LogLevel::Info, "OpenCL RNG mode enabled");
+            Logger::log(LogLevel::Info, "OpenCL RNG island mode enabled");
+            Logger::log(LogLevel::Info, "RNG island size: " + util::formatThousands(_rngIslandSize) + " steps");
+            _rngIslandOffset = 0;
+            _rngIslandReady = false;
             initializeBasePoints();
         } else {
             generateStartingPoints();
@@ -228,7 +231,11 @@ void CLKeySearchDevice::doStep()
         uint64_t numKeys = (uint64_t)_points;
 
         if(_rngMode) {
-            generateRandomStartingPoints();
+            if(!_rngIslandReady || _rngIslandOffset >= _rngIslandSize) {
+                generateRandomStartingPoints();
+                _rngIslandOffset = 0;
+                _rngIslandReady = true;
+            }
 
             _stepKernel->set_args(
                 _points,
@@ -280,6 +287,10 @@ void CLKeySearchDevice::doStep()
         fflush(stdout);
 
         getResultsInternal();
+
+        if(_rngMode) {
+            _rngIslandOffset++;
+        }
 
         _iterations++;
     } catch(cl::CLException ex) {
@@ -440,7 +451,7 @@ void CLKeySearchDevice::getResultsInternal()
             secp256k1::uint256 privateKey;
 
             if(_rngMode) {
-                privateKey = readBigInt(rngPrivateKeys, ptr[i].idx);
+                privateKey = secp256k1::addModN(readBigInt(rngPrivateKeys, ptr[i].idx), secp256k1::uint256(_rngIslandOffset));
             } else {
                 // Calculate the private key based on the number of iterations and the current thread
                 secp256k1::uint256 offset = secp256k1::uint256((uint64_t)_points * _iterations) + secp256k1::uint256(ptr[i].idx) * _stride;
