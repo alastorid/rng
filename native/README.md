@@ -21,7 +21,7 @@ Important: current `native-latest` binaries are CPU-only. `--backend opencl` is 
 OpenCL kernel base has been vendored at:
 
 ```text
-native/vendor/bitcrack-opencl
+native/third_party/bitcrack-opencl
 ```
 
 The next release must wire these kernels into the runtime before `--backend opencl` is enabled.

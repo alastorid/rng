@@ -7,7 +7,7 @@ Current status: the CI-built native binaries are CPU-only. The OpenCL backend is
 Kernel base selected:
 
 ```text
-native/vendor/bitcrack-opencl
+native/third_party/bitcrack-opencl
 ```
 
 The vendored kernels come from BitCrack, which is MIT licensed. They provide OpenCL secp256k1, SHA-256, RIPEMD-160, and key-search kernel code. The next implementation step is runtime integration:
