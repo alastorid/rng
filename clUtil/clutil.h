@@ -16,6 +16,7 @@ namespace cl {
 
     typedef struct {
         cl_device_id id;
+        cl_device_type type;
         int cores;
         uint64_t mem;
         std::string name;

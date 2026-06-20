@@ -11,14 +11,15 @@ void cl::clCall(cl_int err)
 
 std::vector<cl::CLDeviceInfo> cl::getDevices()
 {
-    std::vector<cl::CLDeviceInfo> deviceList;
+    std::vector<cl::CLDeviceInfo> gpuDevices;
+    std::vector<cl::CLDeviceInfo> cpuDevices;
 
     cl_uint platformCount = 0;
 
     clCall(clGetPlatformIDs(0, NULL, &platformCount));
 
     if(platformCount == 0) {
-        return deviceList;
+        return gpuDevices;
     }
 
     cl_platform_id* platforms = new cl_platform_id[platformCount];
@@ -47,6 +48,10 @@ std::vector<cl::CLDeviceInfo> cl::getDevices()
 
             info.name = std::string(buf, size);
 
+            cl_device_type type = 0;
+            clCall(clGetDeviceInfo(devices[j], CL_DEVICE_TYPE, sizeof(type), &type, NULL));
+            info.type = type;
+
             int cores = 0;
             clCall(clGetDeviceInfo(devices[j], CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(cores), &cores, NULL));
 
@@ -57,13 +62,21 @@ std::vector<cl::CLDeviceInfo> cl::getDevices()
 
             info.mem = (uint64_t)mem;
             info.id = devices[j];
-            deviceList.push_back(info);
+            if((type & CL_DEVICE_TYPE_GPU) != 0) {
+                gpuDevices.push_back(info);
+            } else if((type & CL_DEVICE_TYPE_CPU) != 0) {
+                cpuDevices.push_back(info);
+            }
         }
 
-        delete devices;
+        delete[] devices;
     }
 
-    delete platforms;
+    delete[] platforms;
 
-    return deviceList;
+    if(gpuDevices.size() > 0) {
+        return gpuDevices;
+    }
+
+    return cpuDevices;
 }
