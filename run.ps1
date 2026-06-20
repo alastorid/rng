@@ -13,7 +13,7 @@ $DataArchiveDir = Join-Path $DataWorktree "data\blockchair_bitcoin_addresses_lat
 $ExtractDir = "data\blockchair_bitcoin_addresses_latest_extracted"
 $TargetsFile = if ($env:RNG_TARGETS_FILE) { $env:RNG_TARGETS_FILE } else { "data\blockchair_bitcoin_addresses_latest_targets.txt" }
 $ReleaseTag = if ($env:RNG_RELEASE_TAG) { $env:RNG_RELEASE_TAG } else { "bitcrack-latest" }
-$Backend = if ($env:RNG_BACKEND) { $env:RNG_BACKEND } else { "cuda" }
+$Backend = if ($env:RNG_BACKEND) { $env:RNG_BACKEND } else { "opencl" }
 $Keyspace = if ($env:RNG_KEYSPACE) { $env:RNG_KEYSPACE } else { "" }
 $ContinueFile = if ($env:RNG_CONTINUE_FILE) { $env:RNG_CONTINUE_FILE } else { "logs\bitcrack-$Backend.continue" }
 $OutFile = if ($env:RNG_OUT_FILE) { $env:RNG_OUT_FILE } else { "logs\hits.txt" }
@@ -128,9 +128,24 @@ function Ensure-Targets([string] $DumpPath) {
 }
 
 function Download-Asset([string] $Asset, [string] $OutPath) {
+    $outDir = Split-Path -Parent $OutPath
+    if ($outDir) {
+        New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+    }
+
     $gh = Get-Command gh -ErrorAction SilentlyContinue
     if ($gh) {
+        $assets = gh release view $ReleaseTag --repo $Repo --json assets --jq ".assets[].name"
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not inspect release '$ReleaseTag' in $Repo."
+        }
+        if ($Asset -notin @($assets)) {
+            throw "Release '$ReleaseTag' does not contain '$Asset'. Available assets: $($assets -join ', ')"
+        }
         gh release download $ReleaseTag --repo $Repo --pattern $Asset --dir dist --clobber
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to download '$Asset' from release '$ReleaseTag'."
+        }
         Move-Item -Force (Join-Path "dist" $Asset) $OutPath
     }
     elseif ($env:GITHUB_TOKEN) {

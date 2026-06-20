@@ -12,6 +12,35 @@ permissions:
   contents: write
 
 jobs:
+  windows-opencl:
+    name: Build Windows x64 OpenCL
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Install OpenCL SDK
+        shell: pwsh
+        run: |
+          vcpkg install opencl:x64-windows
+
+      - name: Build clBitCrack
+        shell: pwsh
+        run: |
+          msbuild clKeyFinder\clKeyFinder.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:OPENCL_INCLUDE="C:\vcpkg\installed\x64-windows\include" /p:OPENCL_LIB="C:\vcpkg\installed\x64-windows\lib"
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Copy-Item x64\Release\clBitCrack.exe release\clBitCrack-windows-amd64.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clBitCrack-windows-amd64.exe
+          path: release/clBitCrack-windows-amd64.exe
+
   linux-opencl:
     name: Build Linux x64 OpenCL
     runs-on: ubuntu-latest
@@ -39,6 +68,7 @@ jobs:
   publish:
     name: Publish Release
     needs:
+      - windows-opencl
       - linux-opencl
     runs-on: ubuntu-latest
     steps:

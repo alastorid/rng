@@ -6,7 +6,7 @@ A tool for brute-forcing Bitcoin private keys. The main purpose of this project 
 
 `run.ps1` and `run.sh` prepare the runtime dataset from the `data` branch, download a prebuilt BitCrack binary from the `bitcrack-latest` release when one is not already present in `dist/`, convert the Blockchair dump into the address list BitCrack expects, and launch the fast CUDA/OpenCL engine.
 
-Windows defaults to CUDA:
+Windows defaults to OpenCL:
 
 ```
 .\run.ps1
@@ -21,7 +21,7 @@ Linux defaults to OpenCL:
 Useful environment variables:
 
 ```
-RNG_BACKEND=cuda|opencl
+RNG_BACKEND=opencl
 RNG_RELEASE_TAG=bitcrack-latest
 RNG_KEYSPACE=START:END
 RNG_DEVICE=0
