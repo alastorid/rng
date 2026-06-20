@@ -76,7 +76,7 @@ static unsigned int bech32Polymod(const std::vector<unsigned int> &values)
 	return chk;
 }
 
-static bool decodeBech32P2WPKH(const std::string &address, unsigned char program[20])
+static bool decodeBech32Witness(const std::string &address, std::vector<unsigned char> &program)
 {
 	std::string s = address;
 	bool hasLower = false;
@@ -128,29 +128,36 @@ static bool decodeBech32P2WPKH(const std::string &address, unsigned char program
 		return false;
 	}
 
-	if(data.size() != 39 || data[0] != 0) {
+	if(data.size() < 9 || data[0] != 0) {
 		return false;
 	}
 
 	int bits = 0;
 	unsigned int acc = 0;
-	size_t out = 0;
+	program.clear();
 	for(size_t i = 1; i < data.size() - 6; i++) {
 		acc = (acc << 5) | data[i];
 		bits += 5;
 		while(bits >= 8) {
 			bits -= 8;
-			if(out >= 20) {
-				return false;
-			}
-			program[out++] = (unsigned char)((acc >> bits) & 0xff);
+			program.push_back((unsigned char)((acc >> bits) & 0xff));
 		}
 	}
 
-	if(out != 20 || (bits > 0 && ((acc << (8 - bits)) & 0xff) != 0)) {
+	if(program.size() < 2 || program.size() > 40 || (bits > 0 && ((acc << (8 - bits)) & 0xff) != 0)) {
 		return false;
 	}
 
+	return true;
+}
+
+static bool decodeBech32P2WPKH(const std::string &address, unsigned char program[20])
+{
+	std::vector<unsigned char> decoded;
+	if(!decodeBech32Witness(address, decoded) || decoded.size() != 20) {
+		return false;
+	}
+	memcpy(program, decoded.data(), 20);
 	return true;
 }
 
@@ -166,8 +173,8 @@ static void bytesToHash160(const unsigned char bytes[20], unsigned int hash[5])
 
 bool Address::verifyAddress(std::string address)
 {
-	unsigned char program[20];
-	if(decodeBech32P2WPKH(address, program)) {
+	std::vector<unsigned char> program;
+	if(decodeBech32Witness(address, program)) {
 		return true;
 	}
 
@@ -201,10 +208,13 @@ bool Address::verifyAddress(std::string address)
 
 void Address::toHash160(const std::string &s, unsigned int hash[5])
 {
-	unsigned char program[20];
+	std::vector<unsigned char> program;
 
-	if(decodeBech32P2WPKH(s, program)) {
-		bytesToHash160(program, hash);
+	if(decodeBech32Witness(s, program)) {
+		unsigned char target[20] = { 0 };
+		size_t len = program.size() < 20 ? program.size() : 20;
+		memcpy(target, program.data(), len);
+		bytesToHash160(target, hash);
 		return;
 	}
 
