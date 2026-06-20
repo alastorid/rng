@@ -241,6 +241,43 @@ DeviceParameters getDefaultParameters(const DeviceManager::DeviceInfo &device)
     p.blocks = 32;
 	p.pointsPerThread = 32;
 
+#ifdef BUILD_OPENCL
+    if(device.type == DeviceManager::DeviceType::OpenCL) {
+        uint64_t pointBytes = 4ULL * 8ULL * sizeof(unsigned int);
+        uint64_t memoryBudget = device.memory / 4;
+        uint64_t maxBudget = 8ULL * 1024ULL * 1024ULL * 1024ULL;
+        uint64_t minBudget = 256ULL * 1024ULL * 1024ULL;
+
+        if(memoryBudget > maxBudget) {
+            memoryBudget = maxBudget;
+        }
+        if(memoryBudget < minBudget) {
+            memoryBudget = minBudget;
+        }
+
+        p.blocks = device.computeUnits > 0 ? device.computeUnits * 64 : 256;
+        if(p.blocks < 256) {
+            p.blocks = 256;
+        }
+        if(p.blocks > 4096) {
+            p.blocks = 4096;
+        }
+
+        uint64_t targetPoints = memoryBudget / pointBytes;
+        uint64_t launchThreads = (uint64_t)p.blocks * (uint64_t)p.threads;
+        uint64_t points = targetPoints / launchThreads;
+
+        if(points < 32) {
+            points = 32;
+        }
+        if(points > 512) {
+            points = 512;
+        }
+
+        p.pointsPerThread = (int)points;
+    }
+#endif
+
 	return p;
 }
 
@@ -446,6 +483,10 @@ int run()
     if(_config.pointsPerThread == 0) {
         _config.pointsPerThread = params.pointsPerThread;
     }
+
+    Logger::log(LogLevel::Info, "OpenCL work page: " + util::format((uint32_t)_config.blocks) + " blocks, "
+        + util::format((uint32_t)_config.threads) + " threads, "
+        + util::format((uint32_t)_config.pointsPerThread) + " points/thread");
 
     if(runDevices.size() == 1) {
         return runDevice(runDevices[0], _config.blocks, _config.threads, _config.pointsPerThread);

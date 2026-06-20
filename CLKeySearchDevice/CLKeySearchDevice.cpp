@@ -151,6 +151,7 @@ void CLKeySearchDevice::allocateBuffers()
 {
     size_t numKeys = (size_t)_points;
     size_t size = numKeys * 8 * sizeof(unsigned int);
+    _pointsMemSize = size * 4;
 
     // X values
     _x = _clContext->malloc(size);
