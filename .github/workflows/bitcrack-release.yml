@@ -62,7 +62,7 @@ jobs:
 
       - name: Build clBitCrack
         run: |
-          make BUILD_OPENCL=1 OPENCL_INCLUDE=/usr/include OPENCL_LIB=/usr/lib/x86_64-linux-gnu
+          make BUILD_OPENCL=1 OPENCL_INCLUDE=/usr/include OPENCL_LIB=/usr/lib/x86_64-linux-gnu dir_keyfinder
           mkdir -p release
           cp bin/clBitCrack release/clBitCrack-linux-x64
 
