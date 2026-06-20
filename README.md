@@ -4,7 +4,7 @@ A tool for brute-forcing Bitcoin private keys. The main purpose of this project 
 
 ### One-command run scripts
 
-`run.ps1` and `run.sh` prepare the runtime dataset from the `data` branch, download a prebuilt BitCrack binary from the `bitcrack-latest` release when one is not already present in `dist/`, convert the Blockchair dump into the address list BitCrack expects, and launch the fast CUDA/OpenCL engine.
+`run.ps1` and `run.sh` prepare the runtime dataset from the `data` branch, download a prebuilt BitCrack binary from the `bitcrack-latest` release when one is not already present in `dist/`, convert supported P2PKH `1...` entries into the address list BitCrack expects, and launch the fast CUDA/OpenCL engine.
 
 Windows defaults to OpenCL:
 

@@ -100,13 +100,13 @@ ensure_targets() {
   fi | awk -F '[,\t]' '
     {
       gsub(/\r/, "", $1)
-      if ($1 ~ /^(1|3|bc1)[[:alnum:]]{20,}$/) print $1
+      if ($1 ~ /^1[[:alnum:]]{20,}$/) print $1
     }
   ' > "$TARGETS_FILE.tmp"
   mv "$TARGETS_FILE.tmp" "$TARGETS_FILE"
 
   if [[ ! -s "$TARGETS_FILE" ]]; then
-    echo "No Bitcoin addresses were parsed from $dump" >&2
+    echo "No supported P2PKH addresses were parsed from $dump" >&2
     exit 1
   fi
   printf '%s\n' "$TARGETS_FILE"

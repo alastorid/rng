@@ -105,7 +105,7 @@ function Ensure-Targets([string] $DumpPath) {
         try {
             while (($line = $reader.ReadLine()) -ne $null) {
                 $first = ($line -split "[,`t]", 2)[0].Trim()
-                if ($first -match "^(1|3|bc1)[A-Za-z0-9]{20,}$") {
+                if ($first -match "^1[A-Za-z0-9]{20,}$") {
                     $writer.WriteLine($first)
                 }
             }
@@ -122,7 +122,7 @@ function Ensure-Targets([string] $DumpPath) {
 
     Move-Item -Force $tmp $TargetsFile
     if ((Get-Item $TargetsFile).Length -eq 0) {
-        throw "No Bitcoin addresses were parsed from $DumpPath"
+        throw "No supported P2PKH addresses were parsed from $DumpPath"
     }
     return $TargetsFile
 }
