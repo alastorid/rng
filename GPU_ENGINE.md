@@ -12,6 +12,25 @@ native/third_party/bitcrack-opencl
 
 The vendored kernels come from BitCrack, which is MIT licensed. They provide OpenCL secp256k1, SHA-256, RIPEMD-160, and key-search kernel code. The next implementation step is runtime integration:
 
+Kernel review against `ipsbruno3/secp256k1-gpu-accelerator`:
+
+```text
+Current repo kernel: complete, MIT, buildable baseline from BitCrack.
+ipsbruno3 kernel: promising design notes, but not enough published kernel code to vendor or benchmark as-is.
+```
+
+The ipsbruno3 README describes faster ideas such as inline PTX carry chains, register-resident 8-limb integers, Jacobian coordinates, pseudo-Mersenne reduction, windowed NAF, and constant-memory precomputation. However, the currently published `opencl/main.cl` is only a small snippet/placeholder, not a complete importable OpenCL kernel. So we cannot honestly prove our kernel is the quicker one by direct adoption yet.
+
+To prove a faster kernel, the benchmark harness should compile complete kernels on the target NVIDIA box and compare:
+
+- scalar multiplications/sec
+- compressed public keys/sec
+- HASH160 candidates/sec
+- end-to-end local lookups/sec
+- correctness against known private-key/public-key/address vectors
+
+The next implementation step is runtime integration:
+
 ```text
 Go controller
   -> OpenCL runtime binding
@@ -125,7 +144,7 @@ Target command:
 
 ```bash
 rng-gpu \
-  --address-dump data/blockchair_bitcoin_addresses_latest.tsv.gz \
+  --address-dump data/blockchair_bitcoin_addresses_latest_extracted/<dump>.tsv \
   --backend opencl \
   --platform 0 \
   --device 0 \
@@ -162,7 +181,7 @@ Same evidence model as the Node POC:
   "balance_sats": "100000000",
   "private_key_hex": "...",
   "wif_compressed": "...",
-  "dataset_source": "blockchair_bitcoin_addresses_latest.tsv.gz",
+  "dataset_source": "data branch split 7z extracted TSV",
   "dataset_sha256": "...",
   "gpu_backend": "opencl",
   "gpu_device": "..."

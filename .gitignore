@@ -1,8 +1,11 @@
 node_modules/
 dist/
+.cache/
 *.sqlite-shm
 *.sqlite-wal
 data/blockchair_bitcoin_addresses_*.tsv.gz
+data/blockchair_bitcoin_addresses_*.tsv
+data/blockchair_bitcoin_addresses_latest_extracted/
 logs/*.jsonl
 logs/*.json
 logs/*.enc.jsonl

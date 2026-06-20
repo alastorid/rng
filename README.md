@@ -8,21 +8,23 @@ OS entropy -> private key -> public Bitcoin address -> local real address dump l
 
 The main POC uses CI-built native binaries. No npm is required to run it.
 
-## Downloaded Dataset
+## Dataset
 
-The real lookup source is Blockchair's Bitcoin funded-address dump:
-
-```text
-address<TAB>balance
-```
-
-Expected local path:
+The real lookup source is the split 7z archive stored in this repo's `data` branch:
 
 ```text
-data/blockchair_bitcoin_addresses_latest.tsv.gz
+data/blockchair_bitcoin_addresses_latest/blockchair_bitcoin_addresses_latest.7z.001
+...
+data/blockchair_bitcoin_addresses_latest/blockchair_bitcoin_addresses_latest.7z.160
 ```
 
-This file is large and is intentionally not committed to git.
+The scripts fetch that branch locally, extract the archive, and run against the extracted real address-balance TSV:
+
+```text
+data/blockchair_bitcoin_addresses_latest_extracted/<dump>.tsv
+```
+
+No third-party dataset host is used at run time.
 
 ## Run On macOS Apple Silicon
 
@@ -33,7 +35,7 @@ This file is large and is intentionally not committed to git.
 `run.sh` downloads:
 
 - `rng-native-darwin-arm64` from the `native-latest` GitHub release
-- `blockchair_bitcoin_addresses_latest.tsv.gz` if it is not already present
+- the split dataset archive from the repo `data` branch, if it is not already extracted
 
 Then it runs continuously with local lookup only.
 
@@ -54,7 +56,7 @@ From PowerShell:
 `run.ps1` downloads:
 
 - `rng-native-windows-amd64.exe`
-- `blockchair_bitcoin_addresses_latest.tsv.gz`
+- the split dataset archive from the repo `data` branch, if it is not already extracted
 
 Then it runs continuously with local lookup only.
 
@@ -80,13 +82,13 @@ https://github.com/alastorid/rng/releases/tag/native-latest
 Manual macOS command:
 
 ```bash
-./dist/rng-native-darwin-arm64 --address-dump data/blockchair_bitcoin_addresses_latest.tsv.gz --continuous --delay-ms 0 --progress-interval 5s
+./dist/rng-native-darwin-arm64 --address-dump data/blockchair_bitcoin_addresses_latest_extracted/<dump>.tsv --continuous --delay-ms 0 --progress-interval 5s
 ```
 
 Manual Windows command:
 
 ```powershell
-.\dist\rng-native-windows-amd64.exe --address-dump data\blockchair_bitcoin_addresses_latest.tsv.gz --continuous --delay-ms 0 --progress-interval 5s
+.\dist\rng-native-windows-amd64.exe --address-dump data\blockchair_bitcoin_addresses_latest_extracted\<dump>.tsv --continuous --delay-ms 0 --progress-interval 5s
 ```
 
 ## GPU Status
@@ -108,7 +110,7 @@ The current binary is not GPU accelerated yet. See [GPU_ENGINE.md](GPU_ENGINE.md
 The current CPU backend supports concurrent workers and time-based status:
 
 ```bash
-./dist/rng-native-darwin-arm64 --workers 8 --progress-interval 5s --address-dump data/blockchair_bitcoin_addresses_latest.tsv.gz --continuous
+./dist/rng-native-darwin-arm64 --workers 8 --progress-interval 5s --address-dump data/blockchair_bitcoin_addresses_latest_extracted/<dump>.tsv --continuous
 ```
 
 ## Seed Testing Only

@@ -28,16 +28,16 @@ The next release must wire these kernels into the runtime before `--backend open
 
 ## Run
 
-Download the full real address balance dump:
+Fetch and extract the full real address balance dump via the repo-level run script:
 
 ```bash
-curl -fL https://gz.blockchair.com/bitcoin/addresses/blockchair_bitcoin_addresses_latest.tsv.gz -o ../data/blockchair_bitcoin_addresses_latest.tsv.gz
+../run.sh
 ```
 
-Run:
+Manual native run after extraction:
 
 ```bash
-./rng-native --address-dump ../data/blockchair_bitcoin_addresses_latest.tsv.gz --continuous --delay-ms 0 --progress-interval 5s
+./rng-native --address-dump ../data/blockchair_bitcoin_addresses_latest_extracted/<dump>.tsv --continuous --delay-ms 0 --progress-interval 5s
 ```
 
 For seed-file testing only:
@@ -55,7 +55,7 @@ status elapsed=5s sampled=145000 checked=290000 hits=0 rate=29000 keys/sec
 CPU backend lookups use a read-only in-memory address map. Multiple CPU workers can query it concurrently without a per-lookup lock:
 
 ```bash
-./rng-native --workers 8 --address-dump ../data/blockchair_bitcoin_addresses_latest.tsv.gz --continuous
+./rng-native --workers 8 --address-dump ../data/blockchair_bitcoin_addresses_latest_extracted/<dump>.tsv --continuous
 ```
 
 ## Device CLI

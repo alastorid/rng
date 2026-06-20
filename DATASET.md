@@ -6,19 +6,22 @@ Primary dataset for the POC:
 address<TAB>balance_sats
 ```
 
-Source:
+Runtime source:
 
 ```text
-https://gz.blockchair.com/bitcoin/addresses/blockchair_bitcoin_addresses_latest.tsv.gz
+repo branch: data
+path: data/blockchair_bitcoin_addresses_latest/blockchair_bitcoin_addresses_latest.7z.001 ... .160
 ```
 
-Local path:
+The run scripts fetch the `data` branch, extract the split 7z archive, and pass the extracted TSV/TSV.GZ/CSV file into the native runner.
+
+Extracted local path:
 
 ```text
-data/blockchair_bitcoin_addresses_latest.tsv.gz
+data/blockchair_bitcoin_addresses_latest_extracted/<dump>.tsv
 ```
 
-This dump contains real Bitcoin addresses with current balances according to Blockchair's public dump. It is large and should not be committed to git.
+This dump contains real Bitcoin addresses with current balances according to the trusted public dump accepted for the experiment. The repo `data` branch is now the data transport source; the scripts no longer download from a third-party data host.
 
 ## Main POC Lookup
 
@@ -74,9 +77,9 @@ Seed testing only:
 
 ## Storage
 
-Blockchair currently publishes this dump as a multi-GB gzip file. Loading it into memory requires enough RAM for:
+The split 7z archive is large. Loading the extracted dump into memory requires enough RAM for:
 
-- compressed file on disk
+- archive/extracted file on disk
 - decompressed line streaming
 - address map in memory
 
