@@ -80,13 +80,13 @@ https://github.com/alastorid/rng/releases/tag/native-latest
 Manual macOS command:
 
 ```bash
-./dist/rng-native-darwin-arm64 --address-dump data/blockchair_bitcoin_addresses_latest.tsv.gz --continuous --delay-ms 0
+./dist/rng-native-darwin-arm64 --address-dump data/blockchair_bitcoin_addresses_latest.tsv.gz --continuous --delay-ms 0 --progress-interval 5s
 ```
 
 Manual Windows command:
 
 ```powershell
-.\dist\rng-native-windows-amd64.exe --address-dump data\blockchair_bitcoin_addresses_latest.tsv.gz --continuous --delay-ms 0
+.\dist\rng-native-windows-amd64.exe --address-dump data\blockchair_bitcoin_addresses_latest.tsv.gz --continuous --delay-ms 0 --progress-interval 5s
 ```
 
 ## GPU Status
@@ -104,6 +104,12 @@ OpenCL GPU backend
 ```
 
 The current binary is not GPU accelerated yet. See [GPU_ENGINE.md](GPU_ENGINE.md).
+
+The current CPU backend supports concurrent workers and time-based status:
+
+```bash
+./dist/rng-native-darwin-arm64 --workers 8 --progress-interval 5s --address-dump data/blockchair_bitcoin_addresses_latest.tsv.gz --continuous
+```
 
 ## Seed Testing Only
 

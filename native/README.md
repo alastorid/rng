@@ -29,13 +29,25 @@ curl -fL https://gz.blockchair.com/bitcoin/addresses/blockchair_bitcoin_addresse
 Run:
 
 ```bash
-./rng-native --address-dump ../data/blockchair_bitcoin_addresses_latest.tsv.gz --continuous --delay-ms 0
+./rng-native --address-dump ../data/blockchair_bitcoin_addresses_latest.tsv.gz --continuous --delay-ms 0 --progress-interval 5s
 ```
 
 For seed-file testing only:
 
 ```bash
 ./rng-native --address-dump ../data/real-address-balances.csv --samples 10 --allow-small-dump
+```
+
+Status output is time-based, not per-batch spam:
+
+```text
+status elapsed=5s sampled=145000 checked=290000 hits=0 rate=29000 keys/sec
+```
+
+CPU backend lookups use a read-only in-memory address map. Multiple CPU workers can query it concurrently without a per-lookup lock:
+
+```bash
+./rng-native --workers 8 --address-dump ../data/blockchair_bitcoin_addresses_latest.tsv.gz --continuous
 ```
 
 ## Device CLI

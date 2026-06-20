@@ -12,6 +12,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alastorid/rng/native/internal/addressdump"
@@ -35,10 +37,13 @@ func main() {
 		minRecords      = flag.Int("min-records", defaultMinRecords, "minimum address records required for full-dataset runs")
 		allowSmallDump  = flag.Bool("allow-small-dump", false, "allow small seed/test dumps")
 		proofLog        = flag.String("proof-log", "logs/native-hits.jsonl", "hit proof log path")
-		progressEvery   = flag.Int("progress-every", 1000, "print progress every N sampled keys")
+		progressEvery   = flag.Int("progress-every", 0, "deprecated; use --progress-interval")
+		progressInterval = flag.Duration("progress-interval", 5*time.Second, "status update interval, e.g. 5s")
+		workers         = flag.Int("workers", runtime.NumCPU(), "CPU worker count for the CPU backend")
 		storePrivateKey = flag.Bool("store-hit-keys-plain", true, "store hit private keys in proof log")
 	)
 	flag.Parse()
+	_ = progressEvery
 
 	if *listDevices {
 		if err := opencl.ListDevices(os.Stdout); err != nil {
@@ -51,6 +56,9 @@ func main() {
 	}
 	if *backend == "opencl" {
 		log.Fatalf("OpenCL backend selected (platform=%d device=%d), but GPU kernels are not implemented in this release; use --backend cpu", *platform, *device)
+	}
+	if *workers < 1 {
+		log.Fatalf("--workers must be >= 1")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -75,70 +83,166 @@ func main() {
 
 	digest, _ := btc.FileSHA256(*addressDump)
 	runID := fmt.Sprintf("%s-%s", time.Now().UTC().Format("20060102T150405Z"), randomHex(4))
-	stats := engine.Stats{}
+	stats := &runtimeStats{}
 	start := time.Now()
-	fmt.Printf("Run %s backend=cpu os=%s arch=%s dataset_records=%d dataset_sha256=%s\n", runID, runtime.GOOS, runtime.GOARCH, dataset.Count, digest)
+	fmt.Printf("Run %s backend=cpu os=%s arch=%s workers=%d dataset_records=%d dataset_sha256=%s\n", runID, runtime.GOOS, runtime.GOARCH, *workers, dataset.Count, digest)
 
-	for i := 1; *continuous || i <= *samples; i++ {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var nextSample atomic.Uint64
+	var hitMu sync.Mutex
+	errCh := make(chan error, 1)
+	var wg sync.WaitGroup
+
+	reportErr := func(err error) {
 		select {
-		case <-ctx.Done():
-			printFinal(stats, start)
-			return
+		case errCh <- err:
+			cancel()
 		default:
-		}
-
-		result, err := engine.SampleCPU()
-		if err != nil {
-			log.Fatal(err)
-		}
-		stats.SampledKeys++
-
-		for _, candidate := range result.Candidates {
-			stats.CheckedAddresses++
-			if record, ok := dataset.Lookup(candidate.Address); ok {
-				stats.Hits++
-				stats.HasBalance++
-				hit := engine.HitRecord{
-					RunID:                  runID,
-					At:                     time.Now().UTC().Format(time.RFC3339Nano),
-					Backend:                "cpu",
-					Address:                candidate.Address,
-					AddressType:            candidate.Type,
-					BalanceSats:            record.BalanceSats.String(),
-					BalanceBTC:             record.BalanceBTC,
-					DatasetSource:          *addressDump,
-					DatasetSHA256:          digest,
-					PublicKeyCompressedHex: result.PublicKeyCompressedHex,
-				}
-				if *storePrivateKey {
-					hit.PrivateKeyHex = hex.EncodeToString(result.PrivateKey)
-					hit.WIFCompressed = btc.WIFCompressed(result.PrivateKey, true)
-				}
-				if err := json.NewEncoder(hitFile).Encode(hit); err != nil {
-					log.Fatal(err)
-				}
-				fmt.Printf("HIT %s %s balance=%s sats\n", candidate.Type, candidate.Address, record.BalanceSats.String())
-			}
-		}
-
-		if *progressEvery > 0 && stats.SampledKeys%uint64(*progressEvery) == 0 {
-			fmt.Printf("progress sampled=%d checked=%d hits=%d rate=%.0f keys/sec\n", stats.SampledKeys, stats.CheckedAddresses, stats.Hits, stats.KeysPerSecond(start))
-		}
-		if *delayMS > 0 {
-			time.Sleep(time.Duration(*delayMS) * time.Millisecond)
 		}
 	}
 
-	printFinal(stats, start)
+	for workerID := 0; workerID < *workers; workerID++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-runCtx.Done():
+					return
+				default:
+				}
+
+				if !*continuous {
+					index := nextSample.Add(1)
+					if index > uint64(*samples) {
+						return
+					}
+				}
+				result, err := engine.SampleCPU()
+				if err != nil {
+					reportErr(err)
+					return
+				}
+				stats.sampledKeys.Add(1)
+
+				for _, candidate := range result.Candidates {
+					stats.checkedAddresses.Add(1)
+					if record, ok := dataset.Lookup(candidate.Address); ok {
+						stats.hits.Add(1)
+						stats.hasBalance.Add(1)
+						hit := engine.HitRecord{
+							RunID:                  runID,
+							At:                     time.Now().UTC().Format(time.RFC3339Nano),
+							Backend:                "cpu",
+							Address:                candidate.Address,
+							AddressType:            candidate.Type,
+							BalanceSats:            record.BalanceSats.String(),
+							BalanceBTC:             record.BalanceBTC,
+							DatasetSource:          *addressDump,
+							DatasetSHA256:          digest,
+							PublicKeyCompressedHex: result.PublicKeyCompressedHex,
+						}
+						if *storePrivateKey {
+							hit.PrivateKeyHex = hex.EncodeToString(result.PrivateKey)
+							hit.WIFCompressed = btc.WIFCompressed(result.PrivateKey, true)
+						}
+						hitMu.Lock()
+						if err := json.NewEncoder(hitFile).Encode(hit); err != nil {
+							hitMu.Unlock()
+							reportErr(err)
+							return
+						}
+						hitMu.Unlock()
+						fmt.Printf("HIT %s %s balance=%s sats\n", candidate.Type, candidate.Address, record.BalanceSats.String())
+					}
+				}
+
+				if *delayMS > 0 {
+					time.Sleep(time.Duration(*delayMS) * time.Millisecond)
+				}
+			}
+		}()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	var ticker *time.Ticker
+	var tickerC <-chan time.Time
+	if *progressInterval > 0 {
+		ticker = time.NewTicker(*progressInterval)
+		defer ticker.Stop()
+		tickerC = ticker.C
+	}
+
+	for {
+		select {
+		case err := <-errCh:
+			log.Fatal(err)
+		case <-tickerC:
+			printProgress(stats.snapshot(), start)
+		case <-done:
+			printFinal(stats.snapshot(), start)
+			return
+		case <-ctx.Done():
+			cancel()
+		}
+	}
 }
 
-func printFinal(stats engine.Stats, start time.Time) {
+type runtimeStats struct {
+	sampledKeys      atomic.Uint64
+	checkedAddresses atomic.Uint64
+	hits             atomic.Uint64
+	hasBalance       atomic.Uint64
+}
+
+type statsSnapshot struct {
+	sampledKeys      uint64
+	checkedAddresses uint64
+	hits             uint64
+	hasBalance       uint64
+}
+
+func (s *runtimeStats) snapshot() statsSnapshot {
+	return statsSnapshot{
+		sampledKeys:      s.sampledKeys.Load(),
+		checkedAddresses: s.checkedAddresses.Load(),
+		hits:             s.hits.Load(),
+		hasBalance:       s.hasBalance.Load(),
+	}
+}
+
+func (s statsSnapshot) keysPerSecond(start time.Time) float64 {
+	elapsed := time.Since(start).Seconds()
+	if elapsed == 0 {
+		return 0
+	}
+	return float64(s.sampledKeys) / elapsed
+}
+
+func printProgress(stats statsSnapshot, start time.Time) {
+	fmt.Printf("status elapsed=%s sampled=%d checked=%d hits=%d rate=%.0f keys/sec\n",
+		time.Since(start).Round(time.Second),
+		stats.sampledKeys,
+		stats.checkedAddresses,
+		stats.hits,
+		stats.keysPerSecond(start),
+	)
+}
+
+func printFinal(stats statsSnapshot, start time.Time) {
 	fmt.Printf("Completed sampled=%d checked=%d hits=%d has_balance=%d rate=%.0f keys/sec elapsed=%s\n",
-		stats.SampledKeys,
-		stats.CheckedAddresses,
-		stats.Hits,
-		stats.HasBalance,
-		stats.KeysPerSecond(start),
+		stats.sampledKeys,
+		stats.checkedAddresses,
+		stats.hits,
+		stats.hasBalance,
+		stats.keysPerSecond(start),
 		time.Since(start).Round(time.Millisecond),
 	)
 }

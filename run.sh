@@ -39,4 +39,4 @@ if [[ ! -f "$DUMP" ]]; then
   curl -fL "https://gz.blockchair.com/bitcoin/addresses/blockchair_bitcoin_addresses_latest.tsv.gz" -o "$DUMP"
 fi
 
-"$BIN" --address-dump "$DUMP" --continuous --delay-ms 0
+"$BIN" --address-dump "$DUMP" --continuous --delay-ms 0 --progress-interval 5s

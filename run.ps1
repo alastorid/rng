@@ -40,4 +40,4 @@ if (-not (Test-Path $Dump)) {
         -OutFile $Dump
 }
 
-& ".\$Bin" --address-dump $Dump --continuous --delay-ms 0
+& ".\$Bin" --address-dump $Dump --continuous --delay-ms 0 --progress-interval 5s
