@@ -76,7 +76,7 @@ dir_cryptoutil:
 dir_keyfinderlib:	dir_util dir_secp256k1lib dir_cryptoutil dir_addressutil dir_logger
 	make --directory KeyFinderLib
 
-KEYFINDER_DEPS=dir_keyfinderlib
+KEYFINDER_DEPS=dir_keyfinderlib dir_cmdparse
 
 ifeq ($(BUILD_CUDA), 1)
 	KEYFINDER_DEPS:=$(KEYFINDER_DEPS) dir_cudaKeySearchDevice
