@@ -124,11 +124,18 @@ static bool decodeBech32Witness(const std::string &address, std::vector<unsigned
 		checksumValues.push_back((unsigned int)v);
 	}
 
-	if(bech32Polymod(checksumValues) != 1) {
+	unsigned int checksum = bech32Polymod(checksumValues);
+	unsigned int witnessVersion = data[0];
+	if(witnessVersion > 16) {
 		return false;
 	}
 
-	if(data.size() < 9 || data[0] != 0) {
+	if((witnessVersion == 0 && checksum != 1) ||
+		(witnessVersion != 0 && checksum != 0x2bc830a3)) {
+		return false;
+	}
+
+	if(data.size() < 9) {
 		return false;
 	}
 
@@ -148,16 +155,10 @@ static bool decodeBech32Witness(const std::string &address, std::vector<unsigned
 		return false;
 	}
 
-	return true;
-}
-
-static bool decodeBech32P2WPKH(const std::string &address, unsigned char program[20])
-{
-	std::vector<unsigned char> decoded;
-	if(!decodeBech32Witness(address, decoded) || decoded.size() != 20) {
+	if(witnessVersion == 0 && program.size() != 20 && program.size() != 32) {
 		return false;
 	}
-	memcpy(program, decoded.data(), 20);
+
 	return true;
 }
 

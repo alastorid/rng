@@ -105,7 +105,7 @@ function Ensure-Targets([string] $DumpPath) {
         try {
             while (($line = $reader.ReadLine()) -ne $null) {
                 $first = ($line -split "[,`t]", 2)[0].Trim()
-                if ($first -match "^[13][123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{20,}$" -or $first -match "^bc1q[023456789acdefghjklmnpqrstuvwxyz]{20,}$") {
+                if ($first -match "^[13][123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{20,}$" -or $first -match "^bc1[023456789acdefghjklmnpqrstuvwxyz]{20,}$") {
                     $writer.WriteLine($first)
                 }
             }

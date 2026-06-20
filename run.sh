@@ -100,7 +100,7 @@ ensure_targets() {
   fi | awk -F '[,\t]' '
     {
       gsub(/\r/, "", $1)
-      if ($1 ~ /^[13][123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{20,}$/ || $1 ~ /^bc1q[023456789acdefghjklmnpqrstuvwxyz]{20,}$/) print $1
+      if ($1 ~ /^[13][123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{20,}$/ || $1 ~ /^bc1[023456789acdefghjklmnpqrstuvwxyz]{20,}$/) print $1
     }
   ' > "$TARGETS_FILE.tmp"
   mv "$TARGETS_FILE.tmp" "$TARGETS_FILE"
