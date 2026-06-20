@@ -60,7 +60,7 @@ void KeyFinder::setTargets(std::vector<std::string> &targets)
 
 		KeySearchTarget t;
 
-		Base58::toHash160(targets[i], t.value);
+		Address::toHash160(targets[i], t.value);
 
 		_targets.insert(t);
 	}
@@ -93,7 +93,7 @@ void KeyFinder::setTargets(std::string targetsFile)
 
 			KeySearchTarget t;
 
-			Base58::toHash160(line, t.value);
+			Address::toHash160(line, t.value);
 
 			_targets.insert(t);
 		}

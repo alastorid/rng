@@ -6,6 +6,7 @@
 namespace Address {
 	std::string fromPublicKey(const secp256k1::ecpoint &p, bool compressed = false);
 	bool verifyAddress(std::string address);
+	void toHash160(const std::string &s, unsigned int hash[5]);
 };
 
 namespace Base58 {
