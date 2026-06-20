@@ -18,6 +18,14 @@ The CPU backend is intentionally first. It gives us a native correctness referen
 
 Important: current `native-latest` binaries are CPU-only. `--backend opencl` is not GPU acceleration yet.
 
+OpenCL kernel base has been vendored at:
+
+```text
+native/vendor/bitcrack-opencl
+```
+
+The next release must wire these kernels into the runtime before `--backend opencl` is enabled.
+
 ## Run
 
 Download the full real address balance dump:

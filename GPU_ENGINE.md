@@ -4,6 +4,23 @@ Yes, this POC can be rewritten as a native cross-platform engine similar in shap
 
 Current status: the CI-built native binaries are CPU-only. The OpenCL backend is not implemented yet and must not be treated as acceleration until the secp256k1/hash kernels are wired into the runtime.
 
+Kernel base selected:
+
+```text
+native/vendor/bitcrack-opencl
+```
+
+The vendored kernels come from BitCrack, which is MIT licensed. They provide OpenCL secp256k1, SHA-256, RIPEMD-160, and key-search kernel code. The next implementation step is runtime integration:
+
+```text
+Go controller
+  -> OpenCL runtime binding
+  -> compile vendored kernels
+  -> feed RNG key batches to device
+  -> receive P2PKH/P2WPKH candidates
+  -> read-only concurrent CPU lookup
+```
+
 The right architecture is:
 
 ```text
@@ -177,10 +194,10 @@ For a serious GPU version, we should benchmark:
    - derive P2PKH/P2WPKH
    - local lookup
    - proof logs
-3. Add OpenCL device discovery.
-4. Add OpenCL SHA-256/RIPEMD-160 kernels.
-5. Add GPU secp256k1 scalar multiplication.
-6. Compare GPU output against Node/Go CPU output for fixed test keys.
+3. Add OpenCL runtime binding.
+4. Compile vendored BitCrack kernels at startup.
+5. Add device batch generation and result buffers.
+6. Compare GPU output against Go CPU output for fixed test keys.
 7. Enable continuous GPU runs.
 
 Do not skip step 2. A CPU-native engine gives us deterministic correctness before adding GPU complexity.
