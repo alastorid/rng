@@ -19,6 +19,7 @@ private:
     cl::CLKernel *_initKeysKernel = NULL;
     cl::CLKernel *_stepKernel = NULL;
     cl::CLKernel *_stepKernelWithDouble = NULL;
+    cl::CLKernel *_rngKernel = NULL;
 
     uint64_t _globalMemSize = 0;
     uint64_t _pointsMemSize = 0;
@@ -46,6 +47,11 @@ private:
 
     secp256k1::uint256 _stride = 1;
 
+    bool _rngMode = false;
+    int _rngOddBit = -1;
+    int _rngEvenBit = -1;
+    uint64_t _rngSeed = 0;
+
     std::string _deviceName;
 
     // Device memory pointers
@@ -72,6 +78,7 @@ private:
     cl_mem _targets = NULL;
 
     void generateStartingPoints();
+    void generateRandomStartingPoints();
 
     void setIncrementor(secp256k1::ecpoint &p);
 
@@ -109,7 +116,7 @@ private:
 
 public:
 
-    CLKeySearchDevice(uint64_t device, int threads, int pointsPerThread, int blocks = 0);
+    CLKeySearchDevice(uint64_t device, int threads, int pointsPerThread, int blocks = 0, bool rngMode = true, int rngOddBit = -2, int rngEvenBit = -2);
     ~CLKeySearchDevice();
 
 
@@ -138,4 +145,3 @@ public:
 };
 
 #endif
-

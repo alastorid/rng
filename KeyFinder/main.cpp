@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <fstream>
 #include <iostream>
+#include <mutex>
+#include <thread>
 
 #include "KeyFinder.h"
 #include "AddressUtil.h"
@@ -66,12 +68,15 @@ void writeCheckpoint(secp256k1::uint256 nextKey);
 static uint64_t _lastUpdate = 0;
 static uint64_t _runningTime = 0;
 static uint64_t _startTime = 0;
+static std::mutex _outputMutex;
 
 /**
 * Callback to display the private key
 */
 void resultCallback(KeySearchResult info)
 {
+    std::lock_guard<std::mutex> lock(_outputMutex);
+
 	if(_config.resultsFile.length() != 0) {
 		Logger::log(LogLevel::Info, "Found key for address '" + info.address + "'. Written to '" + _config.resultsFile + "'");
 
@@ -108,6 +113,8 @@ Callback to display progress
 */
 void statusCallback(KeySearchStatus info)
 {
+    std::lock_guard<std::mutex> lock(_outputMutex);
+
 	std::string speedStr;
 
 	if(info.speed < 0.01) {
@@ -366,40 +373,10 @@ void readCheckpointFile()
     _config.totalkeys = (_config.nextKey - _config.startKey).toUint64();
 }
 
-int run()
+static int runDevice(DeviceManager::DeviceInfo device, int blocks, int threads, int pointsPerThread)
 {
-    if(_config.device < 0 || _config.device >= _devices.size()) {
-        Logger::log(LogLevel::Error, "device " + util::format(_config.device) + " does not exist");
-        return 1;
-    }
-
-    Logger::log(LogLevel::Info, "Compression: " + getCompressionString(_config.compression));
-    Logger::log(LogLevel::Info, "Starting at: " + _config.nextKey.toString());
-    Logger::log(LogLevel::Info, "Ending at:   " + _config.endKey.toString());
-    Logger::log(LogLevel::Info, "Counting by: " + _config.stride.toString());
-
     try {
-
-        _lastUpdate = util::getSystemTime();
-        _startTime = util::getSystemTime();
-
-        // Use default parameters if they have not been set
-        DeviceParameters params = getDefaultParameters(_devices[_config.device]);
-
-        if(_config.blocks == 0) {
-            _config.blocks = params.blocks;
-        }
-
-        if(_config.threads == 0) {
-            _config.threads = params.threads;
-        }
-
-        if(_config.pointsPerThread == 0) {
-            _config.pointsPerThread = params.pointsPerThread;
-        }
-
-        // Get device context
-        KeySearchDevice *d = getDeviceContext(_devices[_config.device], _config.blocks, _config.threads, _config.pointsPerThread);
+        KeySearchDevice *d = getDeviceContext(device, blocks, threads, pointsPerThread);
 
         KeyFinder f(_config.nextKey, _config.endKey, _config.compression, d, _config.stride);
 
@@ -419,8 +396,78 @@ int run()
 
         delete d;
     } catch(KeySearchException ex) {
-        Logger::log(LogLevel::Info, "Error: " + ex.msg);
+        std::lock_guard<std::mutex> lock(_outputMutex);
+        Logger::log(LogLevel::Info, "Error on " + device.name + ": " + ex.msg);
         return 1;
+    }
+
+    return 0;
+}
+
+int run()
+{
+    std::vector<DeviceManager::DeviceInfo> runDevices;
+
+#ifdef BUILD_OPENCL
+    for(size_t i = 0; i < _devices.size(); i++) {
+        if(_devices[i].type == DeviceManager::DeviceType::OpenCL) {
+            runDevices.push_back(_devices[i]);
+        }
+    }
+#else
+    if(_config.device < 0 || _config.device >= _devices.size()) {
+        Logger::log(LogLevel::Error, "device " + util::format(_config.device) + " does not exist");
+        return 1;
+    }
+    runDevices.push_back(_devices[_config.device]);
+#endif
+
+    if(runDevices.size() == 0) {
+        Logger::log(LogLevel::Error, "No OpenCL devices available");
+        return 1;
+    }
+
+    Logger::log(LogLevel::Info, "Compression: " + getCompressionString(_config.compression));
+    Logger::log(LogLevel::Info, "OpenCL RNG devices: " + util::format((uint32_t)runDevices.size()));
+
+    _lastUpdate = util::getSystemTime();
+    _startTime = util::getSystemTime();
+
+    DeviceParameters params = getDefaultParameters(runDevices[0]);
+
+    if(_config.blocks == 0) {
+        _config.blocks = params.blocks;
+    }
+
+    if(_config.threads == 0) {
+        _config.threads = params.threads;
+    }
+
+    if(_config.pointsPerThread == 0) {
+        _config.pointsPerThread = params.pointsPerThread;
+    }
+
+    if(runDevices.size() == 1) {
+        return runDevice(runDevices[0], _config.blocks, _config.threads, _config.pointsPerThread);
+    }
+
+    std::vector<std::thread> workers;
+    std::vector<int> results(runDevices.size(), 0);
+
+    for(size_t i = 0; i < runDevices.size(); i++) {
+        workers.push_back(std::thread([&, i]() {
+            results[i] = runDevice(runDevices[i], _config.blocks, _config.threads, _config.pointsPerThread);
+        }));
+    }
+
+    for(size_t i = 0; i < workers.size(); i++) {
+        workers[i].join();
+    }
+
+    for(size_t i = 0; i < results.size(); i++) {
+        if(results[i] != 0) {
+            return results[i];
+        }
     }
 
     return 0;

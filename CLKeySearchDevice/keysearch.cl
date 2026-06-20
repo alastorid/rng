@@ -15,6 +15,114 @@ typedef struct {
     unsigned int digest[5];
 }CLDeviceResult;
 
+ulong rotl64(ulong x, int k)
+{
+    return (x << k) | (x >> (64 - k));
+}
+
+ulong mixRng64(ulong x)
+{
+    x ^= x >> 30;
+    x *= 0xbf58476d1ce4e5b9UL;
+    x ^= x >> 27;
+    x *= 0x94d049bb133111ebUL;
+    x ^= x >> 31;
+    return x;
+}
+
+uint rngWord(ulong seed, ulong iteration, uint idx, uint word)
+{
+    ulong x = seed;
+    x ^= ((ulong)idx + 0x9e3779b97f4a7c15UL) * 0xbf58476d1ce4e5b9UL;
+    x ^= rotl64(iteration + 0x94d049bb133111ebUL, (int)((word * 11 + 7) & 63));
+    x ^= ((ulong)word + 1UL) * 0x9e3779b97f4a7c15UL;
+    return (uint)(mixRng64(x) >> 32);
+}
+
+void applyPartialRng(__private uint *word, int oddBit, int evenBit)
+{
+    const uint oddMask = 0xaaaaaaaaU;
+    const uint evenMask = 0x55555555U;
+
+    if(oddBit >= 0) {
+        *word = oddBit ? (*word | oddMask) : (*word & ~oddMask);
+    }
+
+    if(evenBit >= 0) {
+        *word = evenBit ? (*word | evenMask) : (*word & ~evenMask);
+    }
+}
+
+bool isZeroKey(uint256_t k)
+{
+    uint v = 0;
+    for(int i = 0; i < 8; i++) {
+        v |= k.v[i];
+    }
+    return v == 0;
+}
+
+__kernel void rngPrivateKeysKernel(
+    unsigned int totalPoints,
+    ulong seed,
+    ulong iteration,
+    int oddBit,
+    int evenBit,
+    __global uint256_t* privateKeys,
+    __global uint256_t* xPtr,
+    __global uint256_t* yPtr)
+{
+    int gid = get_local_size(0) * get_group_id(0) + get_local_id(0);
+    int dim = get_global_size(0);
+
+    for(int i = gid; i < totalPoints; i += dim) {
+        uint256_t k;
+        int oddMode = oddBit;
+        int evenMode = evenBit;
+
+        if(oddBit == -2 && evenBit == -2) {
+            int mode = i % 5;
+
+            oddMode = -1;
+            evenMode = -1;
+
+            if(mode == 1) {
+                oddMode = 0;
+            } else if(mode == 2) {
+                oddMode = 1;
+            } else if(mode == 3) {
+                evenMode = 0;
+            } else if(mode == 4) {
+                evenMode = 1;
+            }
+        }
+
+        for(uint word = 0; word < 8; word++) {
+            uint v = rngWord(seed, iteration, (uint)i, word);
+            applyPartialRng(&v, oddMode, evenMode);
+            k.v[word] = v;
+        }
+
+        // Keep generated keys inside secp256k1's scalar range by using 255 bits.
+        k.v[0] &= 0x7fffffffU;
+
+        if(isZeroKey(k)) {
+            if(evenMode != 0) {
+                k.v[7] = 1U;
+            } else {
+                k.v[7] = 2U;
+            }
+        }
+
+        privateKeys[i] = k;
+
+        for(int word = 0; word < 8; word++) {
+            xPtr[i].v[word] = 0xffffffffU;
+            yPtr[i].v[word] = 0xffffffffU;
+        }
+    }
+}
+
 bool isInList(unsigned int hash[5], __global unsigned int *targetList, size_t numTargets)
 {
     bool found = false;

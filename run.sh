@@ -100,16 +100,31 @@ ensure_targets() {
   fi | awk -F '[,\t]' '
     {
       gsub(/\r/, "", $1)
-      if ($1 ~ /^1[[:alnum:]]{20,}$/) print $1
+      if ($1 ~ /^[13][123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{20,}$/) print $1
     }
   ' > "$TARGETS_FILE.tmp"
   mv "$TARGETS_FILE.tmp" "$TARGETS_FILE"
 
   if [[ ! -s "$TARGETS_FILE" ]]; then
-    echo "No supported P2PKH addresses were parsed from $dump" >&2
+    echo "No supported Base58 addresses were parsed from $dump" >&2
     exit 1
   fi
   printf '%s\n' "$TARGETS_FILE"
+}
+
+get_asset_version() {
+  local asset="$1"
+
+  if command -v gh >/dev/null 2>&1; then
+    gh release view "$RELEASE_TAG" --repo "$REPO" --json assets \
+      --jq ".assets[] | select(.name == \"$asset\") | \"\\(.id):\\(.updatedAt)\""
+  elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    curl -fsSL -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+      "https://api.github.com/repos/${REPO#github.com/}/releases/tags/${RELEASE_TAG}" |
+      python3 -c 'import json,sys; data=json.load(sys.stdin); name=sys.argv[1]; print(next(str(a["id"])+":"+a["updated_at"] for a in data["assets"] if a["name"]==name))' "$asset"
+  else
+    return 1
+  fi
 }
 
 download_asset() {
@@ -138,6 +153,46 @@ download_asset() {
   chmod +x "$out"
 }
 
+ensure_latest_asset() {
+  local asset="$1"
+  local out="$2"
+  local marker="dist/.${asset}.version"
+  local remote_version=""
+  local local_version=""
+
+  if remote_version="$(get_asset_version "$asset" 2>/dev/null)"; then
+    if [[ -f "$marker" ]]; then
+      local_version="$(cat "$marker")"
+    fi
+
+    if [[ -x "$out" && "$remote_version" == "$local_version" ]]; then
+      return
+    fi
+
+    if [[ -x "$out" ]]; then
+      echo "Updating $asset from release '$RELEASE_TAG'..." >&2
+    else
+      echo "Downloading $asset from release '$RELEASE_TAG'..." >&2
+    fi
+    if download_asset "$asset" "$out"; then
+      printf '%s\n' "$remote_version" > "$marker"
+    elif [[ -x "$out" ]]; then
+      echo "Could not update $asset; using existing $out." >&2
+    else
+      echo "Could not download $asset and no local binary exists at $out." >&2
+      exit 1
+    fi
+    return
+  fi
+
+  if [[ ! -x "$out" ]]; then
+    echo "Downloading $asset from release '$RELEASE_TAG'..." >&2
+    download_asset "$asset" "$out"
+  else
+    echo "Could not check release '$RELEASE_TAG' for updates; using existing $out." >&2
+  fi
+}
+
 case "$BACKEND" in
   opencl|cl)
     BIN="${RNG_BIN:-$BIN_OPENCL}"
@@ -149,13 +204,13 @@ case "$BACKEND" in
     ;;
 esac
 
-if [[ ! -x "$BIN" ]]; then
-  if [[ -z "$ASSET" ]]; then
+if [[ -z "$ASSET" ]]; then
+  if [[ ! -x "$BIN" ]]; then
     echo "RNG_BIN points to '$BIN', but it is not executable." >&2
     exit 1
   fi
-  echo "Downloading $ASSET from release '$RELEASE_TAG'..." >&2
-  download_asset "$ASSET" "$BIN"
+else
+  ensure_latest_asset "$ASSET" "$BIN"
 fi
 
 DUMP="$(ensure_data)"

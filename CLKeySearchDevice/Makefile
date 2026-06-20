@@ -1,5 +1,5 @@
 NAME=CLKeySearchDevice
-CPPSRC:=$(wildcard *.cpp)
+CPPSRC:=$(filter-out bitcrack_cl.cpp,$(wildcard *.cpp))
 
 all:
 	cat ../clMath/sha256.cl ../clMath/secp256k1.cl ../clMath/ripemd160.cl keysearch.cl > bitcrack.cl

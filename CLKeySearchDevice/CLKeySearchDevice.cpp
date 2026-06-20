@@ -30,12 +30,16 @@ static void undoRMD160FinalRound(const unsigned int hIn[5], unsigned int hOut[5]
     }
 }
 
-CLKeySearchDevice::CLKeySearchDevice(uint64_t device, int threads, int pointsPerThread, int blocks)
+CLKeySearchDevice::CLKeySearchDevice(uint64_t device, int threads, int pointsPerThread, int blocks, bool rngMode, int rngOddBit, int rngEvenBit)
 {
     _threads = threads;
     _blocks = blocks;
     _points = pointsPerThread * threads * blocks;
     _device = (cl_device_id)device;
+    _rngMode = rngMode;
+    _rngOddBit = rngOddBit;
+    _rngEvenBit = rngEvenBit;
+    _rngSeed = util::getSystemTime() ^ ((uint64_t)device << 32) ^ (uint64_t)_points;
 
 
     if(threads <= 0 || threads % 32 != 0) {
@@ -58,6 +62,7 @@ CLKeySearchDevice::CLKeySearchDevice(uint64_t device, int threads, int pointsPer
 
         _stepKernel = new cl::CLKernel(*_clProgram, "keyFinderKernel");
         _stepKernelWithDouble = new cl::CLKernel(*_clProgram, "keyFinderKernelWithDouble");
+        _rngKernel = new cl::CLKernel(*_clProgram, "rngPrivateKeysKernel");
 
         _globalMemSize = _clContext->getGlobalMemorySize();
 
@@ -82,6 +87,7 @@ CLKeySearchDevice::~CLKeySearchDevice()
 
     delete _stepKernel;
     delete _stepKernelWithDouble;
+    delete _rngKernel;
     delete _initKeysKernel;
     delete _clContext;
 }
@@ -199,11 +205,16 @@ void CLKeySearchDevice::init(const secp256k1::uint256 &start, int compression, c
     try {
         allocateBuffers();
 
-        generateStartingPoints();
+        if(_rngMode) {
+            Logger::log(LogLevel::Info, "OpenCL RNG mode enabled");
+            initializeBasePoints();
+        } else {
+            generateStartingPoints();
+        }
 
         // Set the incrementor
         secp256k1::ecpoint g = secp256k1::G();
-        secp256k1::ecpoint p = secp256k1::multiplyPoint(secp256k1::uint256((uint64_t)_points ) * _stride, g);
+        secp256k1::ecpoint p = _rngMode ? g : secp256k1::multiplyPoint(secp256k1::uint256((uint64_t)_points ) * _stride, g);
 
         setIncrementor(p);
     } catch(cl::CLException ex) {
@@ -216,7 +227,24 @@ void CLKeySearchDevice::doStep()
     try {
         uint64_t numKeys = (uint64_t)_points;
 
-        if(_iterations < 2 && _start.cmp(numKeys) <= 0) {
+        if(_rngMode) {
+            generateRandomStartingPoints();
+
+            _stepKernel->set_args(
+                _points,
+                _compression,
+                _chain,
+                _x,
+                _y,
+                _xInc,
+                _yInc,
+                _deviceTargetList.ptr,
+                _deviceTargetList.size,
+                _deviceTargetList.mask,
+                _deviceResults,
+                _deviceResultsCount);
+            _stepKernel->call(_blocks, _threads);
+        } else if(_iterations < 2 && _start.cmp(numKeys) <= 0) {
 
             _stepKernelWithDouble->set_args(
                 _points,
@@ -388,8 +416,14 @@ void CLKeySearchDevice::getResultsInternal()
 
     if(numResults > 0) {
         CLDeviceResult *ptr = new CLDeviceResult[numResults];
+        unsigned int *rngPrivateKeys = NULL;
 
         _clContext->copyDeviceToHost(_deviceResults, ptr, sizeof(CLDeviceResult) * numResults);
+
+        if(_rngMode) {
+            rngPrivateKeys = new unsigned int[(size_t)_points * 8];
+            _clContext->copyDeviceToHost(_privateKeys, rngPrivateKeys, (size_t)_points * 8 * sizeof(unsigned int));
+        }
 
         unsigned int actualCount = 0;
 
@@ -403,9 +437,15 @@ void CLKeySearchDevice::getResultsInternal()
 
             KeySearchResult minerResult;
 
-            // Calculate the private key based on the number of iterations and the current thread
-            secp256k1::uint256 offset = secp256k1::uint256((uint64_t)_points * _iterations) + secp256k1::uint256(ptr[i].idx) * _stride;
-            secp256k1::uint256 privateKey = secp256k1::addModN(_start, offset);
+            secp256k1::uint256 privateKey;
+
+            if(_rngMode) {
+                privateKey = readBigInt(rngPrivateKeys, ptr[i].idx);
+            } else {
+                // Calculate the private key based on the number of iterations and the current thread
+                secp256k1::uint256 offset = secp256k1::uint256((uint64_t)_points * _iterations) + secp256k1::uint256(ptr[i].idx) * _stride;
+                privateKey = secp256k1::addModN(_start, offset);
+            }
 
             minerResult.privateKey = privateKey;
             minerResult.compressed = ptr[i].compressed;
@@ -422,6 +462,9 @@ void CLKeySearchDevice::getResultsInternal()
         // Reset device counter
         numResults = 0;
         _clContext->copyHostToDevice(&numResults, _deviceResultsCount, sizeof(unsigned int));
+
+        delete[] rngPrivateKeys;
+        delete[] ptr;
     }
 }
 
@@ -572,9 +615,32 @@ void CLKeySearchDevice::generateStartingPoints()
     Logger::log(LogLevel::Info, "Done");
 }
 
+void CLKeySearchDevice::generateRandomStartingPoints()
+{
+    _rngKernel->set_args(
+        _points,
+        (cl_ulong)_rngSeed,
+        (cl_ulong)_iterations,
+        _rngOddBit,
+        _rngEvenBit,
+        _privateKeys,
+        _x,
+        _y);
+    _rngKernel->call(_blocks, _threads);
+
+    for(int i = 0; i < 256; i++) {
+        _initKeysKernel->set_args(_points, i, _privateKeys, _chain, _xTable, _yTable, _x, _y);
+        _initKeysKernel->call(_blocks, _threads);
+    }
+}
+
 
 secp256k1::uint256 CLKeySearchDevice::getNextKey()
 {
+    if(_rngMode) {
+        return _start;
+    }
+
     uint64_t totalPoints = (uint64_t)_points * _threads * _blocks;
 
     return _start + secp256k1::uint256(totalPoints) * _iterations * _stride;

@@ -105,7 +105,7 @@ function Ensure-Targets([string] $DumpPath) {
         try {
             while (($line = $reader.ReadLine()) -ne $null) {
                 $first = ($line -split "[,`t]", 2)[0].Trim()
-                if ($first -match "^1[A-Za-z0-9]{20,}$") {
+                if ($first -match "^[13][123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{20,}$") {
                     $writer.WriteLine($first)
                 }
             }
@@ -122,9 +122,36 @@ function Ensure-Targets([string] $DumpPath) {
 
     Move-Item -Force $tmp $TargetsFile
     if ((Get-Item $TargetsFile).Length -eq 0) {
-        throw "No supported P2PKH addresses were parsed from $DumpPath"
+        throw "No supported Base58 addresses were parsed from $DumpPath"
     }
     return $TargetsFile
+}
+
+function Get-AssetVersion([string] $Asset) {
+    $gh = Get-Command gh -ErrorAction SilentlyContinue
+    if ($gh) {
+        $version = gh release view $ReleaseTag --repo $Repo --json assets --jq ".assets[] | select(.name == `"$Asset`") | `"\(.id):\(.updatedAt)`"" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $version) {
+            return $version
+        }
+    }
+
+    if ($env:GITHUB_TOKEN) {
+        try {
+            $release = Invoke-RestMethod `
+                -Headers @{ Authorization = "Bearer $env:GITHUB_TOKEN" } `
+                -Uri "https://api.github.com/repos/$ApiRepo/releases/tags/$ReleaseTag"
+            $found = $release.assets | Where-Object { $_.name -eq $Asset } | Select-Object -First 1
+            if ($found) {
+                return "$($found.id):$($found.updated_at)"
+            }
+        }
+        catch {
+            return $null
+        }
+    }
+
+    return $null
 }
 
 function Download-Asset([string] $Asset, [string] $OutPath) {
@@ -169,6 +196,49 @@ function Download-Asset([string] $Asset, [string] $OutPath) {
     }
 }
 
+function Ensure-LatestAsset([string] $Asset, [string] $OutPath) {
+    $marker = Join-Path "dist" ".$Asset.version"
+    $remoteVersion = Get-AssetVersion $Asset
+
+    if ($remoteVersion) {
+        $localVersion = if (Test-Path $marker) { Get-Content -Raw $marker } else { "" }
+        $localVersion = $localVersion.Trim()
+
+        if ((Test-Path $OutPath) -and $localVersion -eq $remoteVersion) {
+            return
+        }
+
+        if (Test-Path $OutPath) {
+            Write-Host "Updating $Asset from release '$ReleaseTag'..."
+        }
+        else {
+            Write-Host "Downloading $Asset from release '$ReleaseTag'..."
+        }
+
+        try {
+            Download-Asset $Asset $OutPath
+            Set-Content -Path $marker -Value $remoteVersion
+        }
+        catch {
+            if (Test-Path $OutPath) {
+                Write-Host "Could not update $Asset; using existing $OutPath."
+            }
+            else {
+                throw "Could not download $Asset and no local binary exists at $OutPath."
+            }
+        }
+        return
+    }
+
+    if (-not (Test-Path $OutPath)) {
+        Write-Host "Downloading $Asset from release '$ReleaseTag'..."
+        Download-Asset $Asset $OutPath
+    }
+    else {
+        Write-Host "Could not check release '$ReleaseTag' for updates; using existing $OutPath."
+    }
+}
+
 switch ($Backend.ToLowerInvariant()) {
     "cuda" {
         $Bin = if ($env:RNG_BIN) { $env:RNG_BIN } else { "dist\cuBitCrack.exe" }
@@ -187,9 +257,13 @@ switch ($Backend.ToLowerInvariant()) {
     }
 }
 
-if (-not (Test-Path $Bin)) {
-    Write-Host "Downloading $Asset from release '$ReleaseTag'..."
-    Download-Asset $Asset $Bin
+if ($env:RNG_BIN) {
+    if (-not (Test-Path $Bin)) {
+        throw "RNG_BIN points to '$Bin', but it does not exist."
+    }
+}
+else {
+    Ensure-LatestAsset $Asset $Bin
 }
 
 $Dump = Ensure-Data

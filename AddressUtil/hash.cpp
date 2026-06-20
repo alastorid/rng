@@ -9,11 +9,42 @@ static unsigned int endian(unsigned int x)
 	return (x << 24) | ((x << 8) & 0x00ff0000) | ((x >> 8) & 0x0000ff00) | (x >> 24);
 }
 
+static unsigned int addressChecksum(unsigned int version, const unsigned int *hash)
+{
+	unsigned int msg[16] = { 0 };
+	unsigned int digest[8] = { 0 };
+
+	msg[0] = (version & 0xff) << 24;
+	msg[0] |= hash[0] >> 8;
+	msg[1] = (hash[0] << 24) | (hash[1] >> 8);
+	msg[2] = (hash[1] << 24) | (hash[2] >> 8);
+	msg[3] = (hash[2] << 24) | (hash[3] >> 8);
+	msg[4] = (hash[3] << 24) | (hash[4] >> 8);
+	msg[5] = (hash[4] << 24) | 0x00800000;
+	msg[15] = 168;
+
+	crypto::sha256Init(digest);
+	crypto::sha256(msg, digest);
+
+	memset(msg, 0, 16 * sizeof(unsigned int));
+	for(int i = 0; i < 8; i++) {
+		msg[i] = digest[i];
+	}
+
+	msg[8] = 0x80000000;
+	msg[15] = 256;
+
+	crypto::sha256Init(digest);
+	crypto::sha256(msg, digest);
+
+	return digest[0];
+}
+
 bool Address::verifyAddress(std::string address)
 {
 	// Check length
-	if(address.length() > 34) {
-		false;
+	if(address.length() < 26 || address.length() > 35) {
+		return false;
 	}
 
 	// Check encoding
@@ -21,9 +52,7 @@ bool Address::verifyAddress(std::string address)
 		return false;
 	}
 
-	std::string noPrefix = address.substr(1);
-
-	secp256k1::uint256 value = Base58::toBigInt(noPrefix);
+	secp256k1::uint256 value = Base58::toBigInt(address);
 	unsigned int words[6];
 	unsigned int hash[5];
 	unsigned int checksum;
@@ -32,7 +61,13 @@ bool Address::verifyAddress(std::string address)
 	memcpy(hash, words, sizeof(unsigned int) * 5);
 	checksum = words[5];
 
-	return crypto::checksum(hash) == checksum;
+	for(unsigned int version = 0; version <= 255; version++) {
+		if(addressChecksum(version, hash) == checksum) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 std::string Address::fromPublicKey(const secp256k1::ecpoint &p, bool compressed)
