@@ -31,9 +31,13 @@ jobs:
       - name: Build clBitCrack
         shell: pwsh
         run: |
-          msbuild clKeyFinder\clKeyFinder.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:OPENCL_INCLUDE="C:\vcpkg\installed\x64-windows\include" /p:OPENCL_LIB="C:\vcpkg\installed\x64-windows\lib"
+          msbuild BitCrack.sln /m /t:clKeyFinder /p:Configuration=Release /p:Platform=x64 /p:OPENCL_INCLUDE="C:\vcpkg\installed\x64-windows\include" /p:OPENCL_LIB="C:\vcpkg\installed\x64-windows\lib"
           New-Item -ItemType Directory -Force -Path release | Out-Null
-          Copy-Item x64\Release\clBitCrack.exe release\clBitCrack-windows-amd64.exe
+          $binary = Get-ChildItem -Path . -Recurse -Filter clBitCrack.exe | Select-Object -First 1
+          if (-not $binary) {
+            throw "clBitCrack.exe was not produced by the Windows build."
+          }
+          Copy-Item $binary.FullName release\clBitCrack-windows-amd64.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
