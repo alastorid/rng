@@ -130,11 +130,11 @@ void CudaKeySearchDevice::generateStartingPoints()
 }
 
 
-void CudaKeySearchDevice::setTargets(const std::set<KeySearchTarget> &targets)
+void CudaKeySearchDevice::setTargets(const std::vector<KeySearchTarget> &targets)
 {
     _targets.clear();
-    
-    for(std::set<KeySearchTarget>::iterator i = targets.begin(); i != targets.end(); ++i) {
+
+    for(std::vector<KeySearchTarget>::const_iterator i = targets.begin(); i != targets.end(); ++i) {
         hash160 h(i->value);
         _targets.push_back(h);
     }

@@ -45,7 +45,7 @@ public:
     virtual void doStep() = 0;
 
     // Tell the device which addresses to search for
-    virtual void setTargets(const std::set<KeySearchTarget> &targets) = 0;
+    virtual void setTargets(const std::vector<KeySearchTarget> &targets) = 0;
 
     // Get the private keys that have been found so far
     virtual size_t getResults(std::vector<KeySearchResult> &results) = 0;

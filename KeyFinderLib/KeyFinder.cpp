@@ -1,4 +1,5 @@
 #include <fstream>
+#include <algorithm>
 #include <deque>
 #include <future>
 #include <iostream>
@@ -10,9 +11,16 @@
 
 #include "Logger.h"
 
-static std::set<KeySearchTarget> parseTargetBatch(std::vector<std::string> lines, uint64_t firstLine)
+static void sortUniqueTargets(std::vector<KeySearchTarget> &targets)
 {
-	std::set<KeySearchTarget> targets;
+	std::sort(targets.begin(), targets.end());
+	targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
+}
+
+static std::vector<KeySearchTarget> parseTargetBatch(std::vector<std::string> lines, uint64_t firstLine)
+{
+	std::vector<KeySearchTarget> targets;
+	targets.reserve(lines.size());
 
 	for(size_t i = 0; i < lines.size(); i++) {
 		std::string line = util::trim(lines[i]);
@@ -30,15 +38,17 @@ static std::set<KeySearchTarget> parseTargetBatch(std::vector<std::string> lines
 
 		KeySearchTarget t;
 		Address::toHash160(line, t.value);
-		targets.insert(t);
+		targets.push_back(t);
 	}
+
+	sortUniqueTargets(targets);
 
 	return targets;
 }
 
-static void mergeTargets(std::set<KeySearchTarget> &dest, std::set<KeySearchTarget> &src)
+static void appendTargets(std::vector<KeySearchTarget> &dest, std::vector<KeySearchTarget> &src)
 {
-	dest.insert(src.begin(), src.end());
+	dest.insert(dest.end(), src.begin(), src.end());
 }
 
 void KeyFinder::defaultResultCallback(KeySearchResult result)
@@ -109,10 +119,11 @@ void KeyFinder::setTargets(std::string targetsFile)
 	}
 	size_t maxPending = (size_t)workers * 2;
 	std::vector<std::string> batch;
-	std::deque<std::future<std::set<KeySearchTarget> > > pending;
+	std::deque<std::future<std::vector<KeySearchTarget> > > pending;
 
 	Logger::log(LogLevel::Info, "Loading addresses from '" + targetsFile + "'");
 	Logger::log(LogLevel::Info, "Parsing targets with " + util::format((uint32_t)workers) + " CPU threads");
+	Logger::log(LogLevel::Info, "Using RAM-first target loading");
 
 	batch.reserve(batchSize);
 	while(std::getline(inFile, line)) {
@@ -127,9 +138,9 @@ void KeyFinder::setTargets(std::string targetsFile)
 			batch.reserve(batchSize);
 
 			while(pending.size() >= maxPending) {
-				std::set<KeySearchTarget> parsed = pending.front().get();
+				std::vector<KeySearchTarget> parsed = pending.front().get();
 				pending.pop_front();
-				mergeTargets(_targets, parsed);
+				appendTargets(_targets, parsed);
 			}
 		}
 	}
@@ -140,10 +151,12 @@ void KeyFinder::setTargets(std::string targetsFile)
 	}
 
 	while(!pending.empty()) {
-		std::set<KeySearchTarget> parsed = pending.front().get();
+		std::vector<KeySearchTarget> parsed = pending.front().get();
 		pending.pop_front();
-		mergeTargets(_targets, parsed);
+		appendTargets(_targets, parsed);
 	}
+
+	sortUniqueTargets(_targets);
 
 	Logger::log(LogLevel::Info, util::formatThousands(_targets.size()) + " addresses loaded ("
 		+ util::format("%.1f", (double)(sizeof(KeySearchTarget) * _targets.size()) / (double)(1024 * 1024)) + "MB)");
@@ -172,7 +185,7 @@ void KeyFinder::setTargetsOnDevice()
 	// Set the target in constant memory
 	std::vector<struct hash160> targets;
 
-	for(std::set<KeySearchTarget>::iterator i = _targets.begin(); i != _targets.end(); ++i) {
+	for(std::vector<KeySearchTarget>::iterator i = _targets.begin(); i != _targets.end(); ++i) {
 		targets.push_back(hash160((*i).value));
 	}
 
@@ -195,14 +208,17 @@ void KeyFinder::stop()
 void KeyFinder::removeTargetFromList(const unsigned int hash[5])
 {
 	KeySearchTarget t(hash);
+	std::vector<KeySearchTarget>::iterator i = std::lower_bound(_targets.begin(), _targets.end(), t);
 
-	_targets.erase(t);
+	if(i != _targets.end() && *i == t) {
+		_targets.erase(i);
+	}
 }
 
 bool KeyFinder::isTargetInList(const unsigned int hash[5])
 {
 	KeySearchTarget t(hash);
-	return _targets.find(t) != _targets.end();
+	return std::binary_search(_targets.begin(), _targets.end(), t);
 }
 
 

@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 #include <vector>
-#include <set>
 #include "secp256k1.h"
 #include "KeySearchTypes.h"
 #include "KeySearchDevice.h"
@@ -17,7 +16,7 @@ private:
 
 	unsigned int _compression;
 
-	std::set<KeySearchTarget> _targets;
+	std::vector<KeySearchTarget> _targets;
 
 	uint64_t _statusInterval;
 

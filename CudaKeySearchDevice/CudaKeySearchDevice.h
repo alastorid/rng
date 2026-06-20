@@ -75,7 +75,7 @@ public:
 
     virtual void doStep();
 
-    virtual void setTargets(const std::set<KeySearchTarget> &targets);
+    virtual void setTargets(const std::vector<KeySearchTarget> &targets);
 
     virtual size_t getResults(std::vector<KeySearchResult> &results);
 

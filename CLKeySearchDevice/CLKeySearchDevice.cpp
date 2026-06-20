@@ -353,12 +353,12 @@ void CLKeySearchDevice::setTargetsInternal()
     }
 }
 
-void CLKeySearchDevice::setTargets(const std::set<KeySearchTarget> &targets)
+void CLKeySearchDevice::setTargets(const std::vector<KeySearchTarget> &targets)
 {
     try {
         _targetList.clear();
 
-        for(std::set<KeySearchTarget>::iterator i = targets.begin(); i != targets.end(); ++i) {
+        for(std::vector<KeySearchTarget>::const_iterator i = targets.begin(); i != targets.end(); ++i) {
             hash160 h(i->value);
             _targetList.push_back(h);
         }
