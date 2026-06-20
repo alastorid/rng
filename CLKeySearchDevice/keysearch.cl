@@ -163,7 +163,7 @@ __kernel void multiplyStepKernel(
 }
 
 
-void hashPublicKey(uint256_t x, uint256_t y, unsigned int* digestOut)
+void hashPublicKey(uint256_t x, uint256_t y, __private unsigned int* digestOut)
 {
     unsigned int hash[8];
 
@@ -177,7 +177,7 @@ void hashPublicKey(uint256_t x, uint256_t y, unsigned int* digestOut)
     ripemd160sha256NoFinal(hash, digestOut);
 }
 
-void hashPublicKeyCompressed(uint256_t x, unsigned int yParity, unsigned int* digestOut)
+void hashPublicKeyCompressed(uint256_t x, unsigned int yParity, __private unsigned int* digestOut)
 {
     unsigned int hash[8];
 
@@ -192,14 +192,14 @@ void hashPublicKeyCompressed(uint256_t x, unsigned int yParity, unsigned int* di
 
 }
 
-void atomicListAdd(__global CLDeviceResult *results, __global unsigned int *numResults, CLDeviceResult *r)
+void atomicListAdd(__global CLDeviceResult *results, __global unsigned int *numResults, __private CLDeviceResult *r)
 {
     unsigned int count = atomic_add(numResults, 1);
 
     results[count] = *r;
 }
 
-void setResultFound(int idx, bool compressed, uint256_t x, uint256_t y, unsigned int digest[5], __global CLDeviceResult* results, __global unsigned int* numResults)
+void setResultFound(int idx, bool compressed, uint256_t x, uint256_t y, __private unsigned int digest[5], __global CLDeviceResult* results, __global unsigned int* numResults)
 {
     CLDeviceResult r;
 
