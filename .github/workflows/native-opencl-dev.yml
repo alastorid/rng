@@ -1,35 +1,18 @@
-name: Native Release
+name: Native OpenCL Dev
 
 on:
   push:
     branches:
-      - main
-    tags:
-      - "v*"
+      - dev-opencl
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.name }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: macOS Apple Silicon
-            runner: macos-14
-            goos: darwin
-            goarch: arm64
-            artifact: rng-native-darwin-arm64
-          - name: Windows x64
-            runner: windows-latest
-            goos: windows
-            goarch: amd64
-            artifact: rng-native-windows-amd64.exe
-
+  build-windows:
+    name: Build Windows x64 OpenCL Dev
+    runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,18 +36,18 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 \
-            go build -trimpath -ldflags="-s -w" -o dist/${{ matrix.artifact }} ./cmd/rng-native
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+            go build -trimpath -ldflags="-s -w" -o dist/rng-native-windows-amd64.exe ./cmd/rng-native
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: native/dist/${{ matrix.artifact }}
+          name: rng-native-windows-amd64.exe
+          path: native/dist/rng-native-windows-amd64.exe
 
   release:
-    name: Publish Release
-    needs: build
+    name: Publish OpenCL Dev Release
+    needs: build-windows
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -81,23 +64,22 @@ jobs:
           find artifacts -type f -maxdepth 2 -print -exec cp {} release/ \;
           ls -la release
 
-      - name: Move rolling release tag
-        if: github.ref == 'refs/heads/main'
+      - name: Move dev release tag
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f native-latest "${GITHUB_SHA}"
-          git push -f origin native-latest
+          git tag -f native-opencl-dev "${GITHUB_SHA}"
+          git push -f origin native-opencl-dev
 
-      - name: Publish rolling release
+      - name: Publish dev release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view native-latest >/dev/null 2>&1; then
-            gh release upload native-latest release/* --clobber
+          if gh release view native-opencl-dev >/dev/null 2>&1; then
+            gh release upload native-opencl-dev release/* --clobber
           else
-            gh release create native-latest release/* \
-              --title "Native Latest" \
-              --notes "Automated native builds from main." \
+            gh release create native-opencl-dev release/* \
+              --title "Native OpenCL Dev" \
+              --notes "Automated Windows OpenCL development builds from dev-opencl." \
               --prerelease
           fi
