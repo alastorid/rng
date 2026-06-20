@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - dev-opencl
     tags:
       - "v*"
   workflow_dispatch:
@@ -82,22 +83,36 @@ jobs:
           ls -la release
 
       - name: Move rolling release tag
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev-opencl'
         run: |
+          if [ "${GITHUB_REF}" = "refs/heads/dev-opencl" ]; then
+            RELEASE_TAG="native-opencl-dev"
+          else
+            RELEASE_TAG="native-latest"
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f native-latest "${GITHUB_SHA}"
-          git push -f origin native-latest
+          git tag -f "${RELEASE_TAG}" "${GITHUB_SHA}"
+          git push -f origin "${RELEASE_TAG}"
 
       - name: Publish rolling release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view native-latest >/dev/null 2>&1; then
-            gh release upload native-latest release/* --clobber
+          if [ "${GITHUB_REF}" = "refs/heads/dev-opencl" ]; then
+            RELEASE_TAG="native-opencl-dev"
+            RELEASE_TITLE="Native OpenCL Dev"
+            RELEASE_NOTES="Automated native OpenCL development builds from dev-opencl."
           else
-            gh release create native-latest release/* \
-              --title "Native Latest" \
-              --notes "Automated native builds from main." \
+            RELEASE_TAG="native-latest"
+            RELEASE_TITLE="Native Latest"
+            RELEASE_NOTES="Automated native builds from main."
+          fi
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" release/* --clobber
+          else
+            gh release create "${RELEASE_TAG}" release/* \
+              --title "${RELEASE_TITLE}" \
+              --notes "${RELEASE_NOTES}" \
               --prerelease
           fi

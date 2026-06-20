@@ -1,3 +1,5 @@
+//go:build !windows
+
 package opencl
 
 import (
@@ -7,9 +9,9 @@ import (
 )
 
 func ListDevices(w io.Writer) error {
-	fmt.Fprintf(w, "OpenCL device discovery placeholder\n")
+	fmt.Fprintf(w, "OpenCL device discovery is implemented for Windows in this dev branch.\n")
 	fmt.Fprintf(w, "OS: %s ARCH: %s\n", runtime.GOOS, runtime.GOARCH)
-	fmt.Fprintf(w, "This release ships the CPU backend. OpenCL kernels/device enumeration are the next native-engine step.\n")
-	fmt.Fprintf(w, "Target platforms: macOS Apple Silicon OpenCL/Metal path, Windows NVIDIA OpenCL/CUDA path.\n")
+	fmt.Fprintf(w, "This build ships the CPU backend plus vendored OpenCL kernel sources.\n")
+	fmt.Fprintf(w, "Target runtime path: Windows NVIDIA OpenCL first, then macOS Apple Silicon.\n")
 	return nil
 }
