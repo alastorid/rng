@@ -324,9 +324,14 @@ void CLKeySearchDevice::setBloomFilter()
 {
     uint64_t bloomFilterMask = getOptimalBloomFilterMask(1.0e-9, _targetList.size());
     uint64_t maxBloomBytes = _globalMemSize / 4;
+    uint64_t cacheFriendlyMax = 2ULL * 1024ULL * 1024ULL * 1024ULL;
 
     if(_globalMemSize > _pointsMemSize) {
         maxBloomBytes = ((_globalMemSize - _pointsMemSize) * 3) / 4;
+    }
+
+    if(maxBloomBytes > cacheFriendlyMax) {
+        maxBloomBytes = cacheFriendlyMax;
     }
 
     while(((bloomFilterMask + 1) / 8) > maxBloomBytes && bloomFilterMask > ((1ULL << 28) - 1)) {
