@@ -1,5 +1,8 @@
 #include <fstream>
+#include <deque>
+#include <future>
 #include <iostream>
+#include <thread>
 
 #include "KeyFinder.h"
 #include "util.h"
@@ -7,6 +10,36 @@
 
 #include "Logger.h"
 
+static std::set<KeySearchTarget> parseTargetBatch(std::vector<std::string> lines, uint64_t firstLine)
+{
+	std::set<KeySearchTarget> targets;
+
+	for(size_t i = 0; i < lines.size(); i++) {
+		std::string line = util::trim(lines[i]);
+
+		if(line.length() == 0) {
+			continue;
+		}
+
+		if(!Address::verifyAddress(line)) {
+			if(firstLine > 0) {
+				throw KeySearchException("Invalid address '" + line + "' on line " + util::format((uint64_t)(firstLine + i)));
+			}
+			throw KeySearchException("Invalid address '" + line + "'");
+		}
+
+		KeySearchTarget t;
+		Address::toHash160(line, t.value);
+		targets.insert(t);
+	}
+
+	return targets;
+}
+
+static void mergeTargets(std::set<KeySearchTarget> &dest, std::set<KeySearchTarget> &src)
+{
+	dest.insert(src.begin(), src.end());
+}
 
 void KeyFinder::defaultResultCallback(KeySearchResult result)
 {
@@ -51,19 +84,7 @@ void KeyFinder::setTargets(std::vector<std::string> &targets)
 
 	_targets.clear();
 
-	// Convert each address from base58 encoded form to a 160-bit integer
-	for(unsigned int i = 0; i < targets.size(); i++) {
-
-		if(!Address::verifyAddress(targets[i])) {
-			throw KeySearchException("Invalid address '" + targets[i] + "'");
-		}
-
-		KeySearchTarget t;
-
-		Address::toHash160(targets[i], t.value);
-
-		_targets.insert(t);
-	}
+	_targets = parseTargetBatch(targets, 0);
 
     _device->setTargets(_targets);
 }
@@ -80,24 +101,50 @@ void KeyFinder::setTargets(std::string targetsFile)
 	_targets.clear();
 
 	std::string line;
+	uint64_t lineNumber = 0;
+	const size_t batchSize = 65536;
+	unsigned int workers = std::thread::hardware_concurrency();
+	if(workers == 0) {
+		workers = 2;
+	}
+	size_t maxPending = (size_t)workers * 2;
+	std::vector<std::string> batch;
+	std::deque<std::future<std::set<KeySearchTarget> > > pending;
+
 	Logger::log(LogLevel::Info, "Loading addresses from '" + targetsFile + "'");
+	Logger::log(LogLevel::Info, "Parsing targets with " + util::format((uint32_t)workers) + " CPU threads");
+
+	batch.reserve(batchSize);
 	while(std::getline(inFile, line)) {
 		util::removeNewline(line);
-        line = util::trim(line);
+		lineNumber++;
+		batch.push_back(line);
 
-		if(line.length() > 0) {
-			if(!Address::verifyAddress(line)) {
-				Logger::log(LogLevel::Error, "Invalid address '" + line + "'");
-				throw KeySearchException();
+		if(batch.size() >= batchSize) {
+			uint64_t firstLine = lineNumber - batch.size() + 1;
+			pending.push_back(std::async(std::launch::async, parseTargetBatch, std::move(batch), firstLine));
+			batch.clear();
+			batch.reserve(batchSize);
+
+			while(pending.size() >= maxPending) {
+				std::set<KeySearchTarget> parsed = pending.front().get();
+				pending.pop_front();
+				mergeTargets(_targets, parsed);
 			}
-
-			KeySearchTarget t;
-
-			Address::toHash160(line, t.value);
-
-			_targets.insert(t);
 		}
 	}
+
+	if(batch.size() > 0) {
+		uint64_t firstLine = lineNumber - batch.size() + 1;
+		pending.push_back(std::async(std::launch::async, parseTargetBatch, std::move(batch), firstLine));
+	}
+
+	while(!pending.empty()) {
+		std::set<KeySearchTarget> parsed = pending.front().get();
+		pending.pop_front();
+		mergeTargets(_targets, parsed);
+	}
+
 	Logger::log(LogLevel::Info, util::formatThousands(_targets.size()) + " addresses loaded ("
 		+ util::format("%.1f", (double)(sizeof(KeySearchTarget) * _targets.size()) / (double)(1024 * 1024)) + "MB)");
 
