@@ -2,6 +2,8 @@
 
 RNG is an OpenCL-first Bitcoin address research runner. It loads a balance/address dataset, filters targets if requested, spreads work across all OpenCL devices, and runs the GPU RNG search path with device-side Bloom filtering.
 
+RNG is derived from and still uses major components from [brichard19/BitCrack](https://github.com/brichard19/BitCrack). This project has been refocused around the RNG runner, target loading, Bloom tuning, and OpenCL multi-device execution.
+
 The normal entrypoint is the platform run script:
 
 ```sh
