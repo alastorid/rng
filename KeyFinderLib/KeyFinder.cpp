@@ -159,7 +159,18 @@ void KeyFinder::setTargets(std::vector<std::string> &targets)
     _device->setTargets(_targets);
 }
 
-void KeyFinder::setTargets(std::string targetsFile)
+void KeyFinder::setTargets(const std::vector<KeySearchTarget> &targets)
+{
+	if(targets.size() == 0) {
+		throw KeySearchException("Requires at least 1 target");
+	}
+
+	_targets = targets;
+
+    _device->setTargets(_targets);
+}
+
+std::vector<KeySearchTarget> KeyFinder::loadTargetsFromFile(std::string targetsFile)
 {
 	std::ifstream inFile(targetsFile.c_str());
 
@@ -168,7 +179,7 @@ void KeyFinder::setTargets(std::string targetsFile)
 		throw KeySearchException();
 	}
 
-	_targets.clear();
+	std::vector<KeySearchTarget> targets;
 
 	std::string line;
 	uint64_t lineNumber = 0;
@@ -219,7 +230,7 @@ void KeyFinder::setTargets(std::string targetsFile)
 			while(pending.size() >= maxPending) {
 				std::vector<KeySearchTarget> parsed = pending.front().get();
 				pending.pop_front();
-				appendTargets(_targets, parsed);
+				appendTargets(targets, parsed);
 			}
 		}
 	}
@@ -232,15 +243,21 @@ void KeyFinder::setTargets(std::string targetsFile)
 	while(!pending.empty()) {
 		std::vector<KeySearchTarget> parsed = pending.front().get();
 		pending.pop_front();
-		appendTargets(_targets, parsed);
+		appendTargets(targets, parsed);
 	}
 
-	sortUniqueTargets(_targets);
+	sortUniqueTargets(targets);
 
-	Logger::log(LogLevel::Info, util::formatThousands(_targets.size()) + " addresses loaded ("
-		+ util::format("%.1f", (double)(sizeof(KeySearchTarget) * _targets.size()) / (double)(1024 * 1024)) + "MB)");
+	Logger::log(LogLevel::Info, util::formatThousands(targets.size()) + " addresses loaded ("
+		+ util::format("%.1f", (double)(sizeof(KeySearchTarget) * targets.size()) / (double)(1024 * 1024)) + "MB)");
 
-    _device->setTargets(_targets);
+	return targets;
+}
+
+void KeyFinder::setTargets(std::string targetsFile)
+{
+	std::vector<KeySearchTarget> targets = loadTargetsFromFile(targetsFile);
+	setTargets(targets);
 }
 
 

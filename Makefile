@@ -11,6 +11,8 @@ LIBS+=-L$(LIBDIR)
 # C++ options
 CXX=g++
 CXXFLAGS=-O2 -std=c++11
+BUILD_ID=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+CXXFLAGS+=-DBITCRACK_BUILD_ID=\"$(BUILD_ID)\"
 
 # CUDA variables
 COMPUTE_CAP=30

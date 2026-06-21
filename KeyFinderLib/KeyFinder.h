@@ -58,6 +58,9 @@ public:
 
 	void setTargets(std::string targetFile);
 	void setTargets(std::vector<std::string> &targets);
+	void setTargets(const std::vector<KeySearchTarget> &targets);
+
+	static std::vector<KeySearchTarget> loadTargetsFromFile(std::string targetFile);
 
     secp256k1::uint256 getNextKey();
 };

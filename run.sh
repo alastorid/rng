@@ -322,4 +322,5 @@ if [[ -n "${RNG_POINTS:-}" ]]; then
   ARGS+=(--points "$RNG_POINTS")
 fi
 
+echo "Launching $BIN" >&2
 exec "$BIN" "${ARGS[@]}" "$@"

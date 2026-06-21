@@ -393,4 +393,5 @@ if ($env:RNG_POINTS) {
 }
 $BitCrackArgs += $args
 
+Write-Host "Launching $Bin"
 & $Bin @BitCrackArgs

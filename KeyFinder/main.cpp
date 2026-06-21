@@ -5,6 +5,10 @@
 #include <mutex>
 #include <thread>
 
+#ifndef BITCRACK_BUILD_ID
+#define BITCRACK_BUILD_ID "unknown"
+#endif
+
 #include "KeyFinder.h"
 #include "AddressUtil.h"
 #include "util.h"
@@ -413,7 +417,7 @@ void readCheckpointFile()
     _config.totalkeys = (_config.nextKey - _config.startKey).toUint64();
 }
 
-static int runDevice(DeviceManager::DeviceInfo device, int blocks, int threads, int pointsPerThread)
+static int runDevice(DeviceManager::DeviceInfo device, int blocks, int threads, int pointsPerThread, const std::vector<KeySearchTarget> *loadedTargets)
 {
     std::string stage = "creating device context";
 
@@ -430,8 +434,8 @@ static int runDevice(DeviceManager::DeviceInfo device, int blocks, int threads, 
         f.init();
 
         stage = "loading targets";
-        if(!_config.targetsFile.empty()) {
-            f.setTargets(_config.targetsFile);
+        if(loadedTargets != NULL) {
+            f.setTargets(*loadedTargets);
         } else {
             f.setTargets(_config.targets);
         }
@@ -482,6 +486,7 @@ int run()
     }
 
     Logger::log(LogLevel::Info, "Compression: " + getCompressionString(_config.compression));
+    Logger::log(LogLevel::Info, "Build: " + std::string(BITCRACK_BUILD_ID));
     Logger::log(LogLevel::Info, "OpenCL RNG devices: " + util::format((uint32_t)runDevices.size()));
 
     _lastUpdate = util::getSystemTime();
@@ -505,8 +510,28 @@ int run()
         + util::format((uint32_t)_config.threads) + " threads, "
         + util::format((uint32_t)_config.pointsPerThread) + " points/thread");
 
+    std::vector<KeySearchTarget> loadedTargets;
+    const std::vector<KeySearchTarget> *loadedTargetsPtr = NULL;
+
+    if(!_config.targetsFile.empty()) {
+        try {
+            loadedTargets = KeyFinder::loadTargetsFromFile(_config.targetsFile);
+            loadedTargetsPtr = &loadedTargets;
+        } catch(KeySearchException ex) {
+            std::string msg = ex.msg.length() > 0 ? ex.msg : "no detail from target loader";
+            Logger::log(LogLevel::Error, "Error loading targets: " + msg);
+            return 1;
+        } catch(std::exception &ex) {
+            Logger::log(LogLevel::Error, "Error loading targets: " + std::string(ex.what()));
+            return 1;
+        } catch(...) {
+            Logger::log(LogLevel::Error, "Error loading targets: unknown exception");
+            return 1;
+        }
+    }
+
     if(runDevices.size() == 1) {
-        return runDevice(runDevices[0], _config.blocks, _config.threads, _config.pointsPerThread);
+        return runDevice(runDevices[0], _config.blocks, _config.threads, _config.pointsPerThread, loadedTargetsPtr);
     }
 
     std::vector<std::thread> workers;
@@ -514,7 +539,7 @@ int run()
 
     for(size_t i = 0; i < runDevices.size(); i++) {
         workers.push_back(std::thread([&, i]() {
-            results[i] = runDevice(runDevices[i], _config.blocks, _config.threads, _config.pointsPerThread);
+            results[i] = runDevice(runDevices[i], _config.blocks, _config.threads, _config.pointsPerThread, loadedTargetsPtr);
         }));
     }
 
