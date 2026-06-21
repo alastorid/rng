@@ -26,8 +26,7 @@ struct TargetLoadOptions {
 
 static bool isSpecialSkippedAddress(const std::string &address)
 {
-	return address == "s-272edf45031dd498e7b3ae89e11ff21b"
-		|| address == "d-9ede1dfcfc8b7e11de4e88bcab11b809";
+	return address[1] == '-';
 }
 
 static std::vector<std::string> splitTargetColumns(const std::string &line)
