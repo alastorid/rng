@@ -50,7 +50,7 @@ private:
     bool _rngMode = false;
     int _rngOddBit = -1;
     int _rngEvenBit = -1;
-    uint64_t _rngSeed = 0;
+    unsigned int _rngSeed[8] = { 0 };
     uint64_t _rngIslandSize = 4096;
     uint64_t _rngIslandOffset = 0;
     bool _rngIslandReady = false;
@@ -75,6 +75,8 @@ private:
     cl_mem _yInc = NULL;
 
     cl_mem _privateKeys = NULL;
+
+    cl_mem _rngSeedMem = NULL;
 
     cl_mem _xTable = NULL;
     

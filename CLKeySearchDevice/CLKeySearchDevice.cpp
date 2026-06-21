@@ -1,5 +1,11 @@
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#ifdef _WIN32
+#include <Windows.h>
+#include <bcrypt.h>
+#endif
 #include "Logger.h"
 #include "util.h"
 #include "CLKeySearchDevice.h"
@@ -83,6 +89,29 @@ static uint64_t nextPowerOfTwo(uint64_t value)
     return p;
 }
 
+static void secureRandomBytes(unsigned char *buf, size_t count)
+{
+#ifdef _WIN32
+    NTSTATUS status = BCryptGenRandom(NULL, buf, (ULONG)count, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    if(status < 0) {
+        throw KeySearchException("OS CSPRNG failed: BCryptGenRandom");
+    }
+#else
+    FILE *fp = fopen("/dev/urandom", "rb");
+
+    if(fp == NULL) {
+        throw KeySearchException("OS CSPRNG failed: cannot open /dev/urandom");
+    }
+
+    size_t got = fread(buf, 1, count, fp);
+    fclose(fp);
+
+    if(got != count) {
+        throw KeySearchException("OS CSPRNG failed: short read from /dev/urandom");
+    }
+#endif
+}
+
 typedef struct {
     int idx;
     bool compressed;
@@ -120,7 +149,9 @@ CLKeySearchDevice::CLKeySearchDevice(uint64_t device, int threads, int pointsPer
     _rngEvenBit = rngEvenBit;
     _selfTest = selfTest;
     _selfTestIndex = selfTestIndex;
-    _rngSeed = util::getSystemTime() ^ ((uint64_t)device << 32) ^ (uint64_t)_points;
+    if(_rngMode) {
+        secureRandomBytes((unsigned char *)_rngSeed, sizeof(_rngSeed));
+    }
 
     if(_selfTest && selfTestKey != NULL) {
         memcpy(_selfTestKey, selfTestKey, sizeof(_selfTestKey));
@@ -168,6 +199,7 @@ CLKeySearchDevice::~CLKeySearchDevice()
     _clContext->free(_yInc);
     _clContext->free(_deviceResults);
     _clContext->free(_deviceResultsCount);
+    _clContext->free(_rngSeedMem);
 
     delete _stepKernel;
     delete _stepKernelWithDouble;
@@ -251,6 +283,11 @@ void CLKeySearchDevice::allocateBuffers()
     // RNG mode writes private keys on-device before the point initialization pass.
     _privateKeys = _clContext->malloc(size, _rngMode ? CL_MEM_READ_WRITE : CL_MEM_READ_ONLY);
 
+    if(_rngMode) {
+        _rngSeedMem = _clContext->malloc(sizeof(_rngSeed), CL_MEM_READ_ONLY);
+        _clContext->copyHostToDevice(_rngSeed, _rngSeedMem, sizeof(_rngSeed));
+    }
+
     // Lookup table for initialization
     _xTable = _clContext->malloc(256 * 8 * sizeof(unsigned int), CL_MEM_READ_ONLY);
     _yTable = _clContext->malloc(256 * 8 * sizeof(unsigned int), CL_MEM_READ_ONLY);
@@ -296,6 +333,7 @@ void CLKeySearchDevice::init(const secp256k1::uint256 &start, int compression, c
             int islandLevel = getIslandLevel();
             _rngIslandSize = getIslandSteps(islandLevel);
             Logger::log(LogLevel::Info, "OpenCL RNG island mode enabled");
+            Logger::log(LogLevel::Info, "RNG stream: OS CSPRNG seed + ChaCha20 on GPU");
             Logger::log(LogLevel::Info, "RNG island size: " + util::formatThousands(_rngIslandSize) + " steps, island" + util::format((uint32_t)islandLevel));
             _rngIslandOffset = 0;
             _rngIslandReady = false;
@@ -762,10 +800,10 @@ void CLKeySearchDevice::generateRandomStartingPoints()
 {
     _rngKernel->set_args(
         _points,
-        (cl_ulong)_rngSeed,
         (cl_ulong)_iterations,
         _rngOddBit,
         _rngEvenBit,
+        _rngSeedMem,
         _privateKeys,
         _x,
         _y);

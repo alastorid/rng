@@ -18,28 +18,55 @@ typedef struct {
     unsigned int keyOffsetHi;
 }CLDeviceResult;
 
-ulong rotl64(ulong x, int k)
+uint rotl32(uint x, int k)
 {
-    return (x << k) | (x >> (64 - k));
+    return (x << k) | (x >> (32 - k));
 }
 
-ulong mixRng64(ulong x)
+void chachaQuarterRound(__private uint *a, __private uint *b, __private uint *c, __private uint *d)
 {
-    x ^= x >> 30;
-    x *= 0xbf58476d1ce4e5b9UL;
-    x ^= x >> 27;
-    x *= 0x94d049bb133111ebUL;
-    x ^= x >> 31;
-    return x;
+    *a += *b; *d ^= *a; *d = rotl32(*d, 16);
+    *c += *d; *b ^= *c; *b = rotl32(*b, 12);
+    *a += *b; *d ^= *a; *d = rotl32(*d, 8);
+    *c += *d; *b ^= *c; *b = rotl32(*b, 7);
 }
 
-uint rngWord(ulong seed, ulong iteration, uint idx, uint word)
+void chacha20Block(__global const uint *seed, ulong iteration, uint idx, __private uint *out)
 {
-    ulong x = seed;
-    x ^= ((ulong)idx + 0x9e3779b97f4a7c15UL) * 0xbf58476d1ce4e5b9UL;
-    x ^= rotl64(iteration + 0x94d049bb133111ebUL, (int)((word * 11 + 7) & 63));
-    x ^= ((ulong)word + 1UL) * 0x9e3779b97f4a7c15UL;
-    return (uint)(mixRng64(x) >> 32);
+    uint state[16];
+
+    state[0] = 0x61707865U;
+    state[1] = 0x3320646eU;
+    state[2] = 0x79622d32U;
+    state[3] = 0x6b206574U;
+
+    for(int i = 0; i < 8; i++) {
+        state[4 + i] = seed[i];
+    }
+
+    state[12] = idx;
+    state[13] = (uint)iteration;
+    state[14] = (uint)(iteration >> 32);
+    state[15] = idx ^ (uint)(iteration * 0x9e3779b97f4a7c15UL);
+
+    for(int i = 0; i < 16; i++) {
+        out[i] = state[i];
+    }
+
+    for(int i = 0; i < 10; i++) {
+        chachaQuarterRound(&out[0], &out[4], &out[8], &out[12]);
+        chachaQuarterRound(&out[1], &out[5], &out[9], &out[13]);
+        chachaQuarterRound(&out[2], &out[6], &out[10], &out[14]);
+        chachaQuarterRound(&out[3], &out[7], &out[11], &out[15]);
+        chachaQuarterRound(&out[0], &out[5], &out[10], &out[15]);
+        chachaQuarterRound(&out[1], &out[6], &out[11], &out[12]);
+        chachaQuarterRound(&out[2], &out[7], &out[8], &out[13]);
+        chachaQuarterRound(&out[3], &out[4], &out[9], &out[14]);
+    }
+
+    for(int i = 0; i < 16; i++) {
+        out[i] += state[i];
+    }
 }
 
 void applyPartialRng(__private uint *word, int oddBit, int evenBit)
@@ -65,12 +92,31 @@ bool isZeroKey(uint256_t k)
     return v == 0;
 }
 
+bool isGreaterOrEqualSecp256k1N(uint256_t k)
+{
+    const uint n[8] = {
+        0xffffffffU, 0xffffffffU, 0xffffffffU, 0xfffffffeU,
+        0xbaaedce6U, 0xaf48a03bU, 0xbfd25e8cU, 0xd0364141U
+    };
+
+    for(int i = 0; i < 8; i++) {
+        if(k.v[i] > n[i]) {
+            return true;
+        }
+        if(k.v[i] < n[i]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 __kernel void rngPrivateKeysKernel(
     unsigned int totalPoints,
-    ulong seed,
     ulong iteration,
     int oddBit,
     int evenBit,
+    __global const uint* rngSeed,
     __global uint256_t* privateKeys,
     __global uint256_t* xPtr,
     __global uint256_t* yPtr)
@@ -80,6 +126,7 @@ __kernel void rngPrivateKeysKernel(
 
     for(int i = gid; i < totalPoints; i += dim) {
         uint256_t k;
+        uint rnd[16];
         int oddMode = oddBit;
         int evenMode = evenBit;
 
@@ -100,16 +147,15 @@ __kernel void rngPrivateKeysKernel(
             }
         }
 
+        chacha20Block(rngSeed, iteration, (uint)i, rnd);
+
         for(uint word = 0; word < 8; word++) {
-            uint v = rngWord(seed, iteration, (uint)i, word);
+            uint v = rnd[word];
             applyPartialRng(&v, oddMode, evenMode);
             k.v[word] = v;
         }
 
-        // Keep generated keys inside secp256k1's scalar range by using 255 bits.
-        k.v[0] &= 0x7fffffffU;
-
-        if(isZeroKey(k)) {
+        if(isZeroKey(k) || isGreaterOrEqualSecp256k1N(k)) {
             if(evenMode != 0) {
                 k.v[7] = 1U;
             } else {
