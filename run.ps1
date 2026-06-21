@@ -5,13 +5,58 @@ Set-Location $Root
 
 New-Item -ItemType Directory -Force -Path "data", "dist", "logs", ".cache" | Out-Null
 
+$MinBalanceSpec = if ($env:RNG_MIN_BALANCE) { $env:RNG_MIN_BALANCE } else { "" }
+$PassThroughArgs = @()
+foreach ($arg in $args) {
+    if ($arg -match "^[0-9]+(\.[0-9]+)?btc$") {
+        $MinBalanceSpec = $arg
+    }
+    else {
+        $PassThroughArgs += $arg
+    }
+}
+$args = $PassThroughArgs
+
+function Convert-BtcToSats([string] $Spec) {
+    if (-not $Spec) {
+        return [Int64]0
+    }
+    if ($Spec -notmatch "^([0-9]+)(?:\.([0-9]+))?btc$") {
+        throw "Invalid balance filter '$Spec'. Use values like 1btc or 10btc."
+    }
+
+    $whole = [Int64]$Matches[1]
+    $frac = if ($Matches[2]) { $Matches[2] } else { "" }
+    if ($frac.Length -gt 8) {
+        $frac = $frac.Substring(0, 8)
+    }
+    while ($frac.Length -lt 8) {
+        $frac += "0"
+    }
+
+    return ($whole * 100000000) + [Int64]$frac
+}
+
+$MinBalanceSats = Convert-BtcToSats $MinBalanceSpec
+if ($MinBalanceSpec -and $MinBalanceSats -le 0) {
+    throw "Invalid balance filter '$MinBalanceSpec'. Use values like 1btc or 10btc."
+}
+
 $Repo = if ($env:RNG_REPO) { $env:RNG_REPO } else { "github.com/alastorid/rng" }
 $ApiRepo = $Repo -replace "^github.com/", ""
 $DataBranch = if ($env:RNG_DATA_BRANCH) { $env:RNG_DATA_BRANCH } else { "data" }
 $DataWorktree = ".cache\data-branch"
 $DataArchiveDir = Join-Path $DataWorktree "data\blockchair_bitcoin_addresses_latest"
 $ExtractDir = "data\blockchair_bitcoin_addresses_latest_extracted"
-$TargetsFile = if ($env:RNG_TARGETS_FILE) { $env:RNG_TARGETS_FILE } else { "data\blockchair_bitcoin_addresses_latest_targets.txt" }
+if ($env:RNG_TARGETS_FILE) {
+    $TargetsFile = $env:RNG_TARGETS_FILE
+}
+elseif ($MinBalanceSats -gt 0) {
+    $TargetsFile = "data\blockchair_bitcoin_addresses_latest_targets_min_$($MinBalanceSats)sats.txt"
+}
+else {
+    $TargetsFile = "data\blockchair_bitcoin_addresses_latest_targets.txt"
+}
 $ReleaseTag = if ($env:RNG_RELEASE_TAG) { $env:RNG_RELEASE_TAG } else { "bitcrack-latest" }
 $Backend = if ($env:RNG_BACKEND) { $env:RNG_BACKEND } else { "opencl" }
 $Keyspace = if ($env:RNG_KEYSPACE) { $env:RNG_KEYSPACE } else { "" }
@@ -79,6 +124,9 @@ function Ensure-Targets([string] $DumpPath) {
     }
 
     Write-Host "Preparing BitCrack target address list..."
+    if ($MinBalanceSats -gt 0) {
+        Write-Host "Filtering addresses with balance >= $MinBalanceSpec ($MinBalanceSats sats)..."
+    }
     $targetDir = Split-Path -Parent $TargetsFile
     if ($targetDir) {
         New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
@@ -103,8 +151,36 @@ function Ensure-Targets([string] $DumpPath) {
     try {
         $writer = [System.IO.StreamWriter]::new($tmp, $false)
         try {
+            $balanceColumn = 1
+            $lineNumber = 0
             while (($line = $reader.ReadLine()) -ne $null) {
-                $first = ($line -split "[,`t]", 2)[0].Trim()
+                $lineNumber++
+                $columns = $line -split "[,`t]"
+                if ($columns.Count -eq 0) {
+                    continue
+                }
+
+                $first = $columns[0].Trim()
+                if ($lineNumber -eq 1 -and $first.ToLowerInvariant() -eq "address") {
+                    for ($i = 0; $i -lt $columns.Count; $i++) {
+                        $name = $columns[$i].Trim().ToLowerInvariant()
+                        if ($name -eq "balance" -or $name -eq "balance_satoshi" -or $name -eq "balance_satoshis") {
+                            $balanceColumn = $i
+                        }
+                    }
+                    continue
+                }
+
+                if ($MinBalanceSats -gt 0) {
+                    $balance = [Int64]0
+                    if ($columns.Count -gt $balanceColumn) {
+                        [void][Int64]::TryParse($columns[$balanceColumn].Trim(), [ref]$balance)
+                    }
+                    if ($balance -lt $MinBalanceSats) {
+                        continue
+                    }
+                }
+
                 if ($first -match "^[13][123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{20,}$" -or $first -match "^bc1[023456789acdefghjklmnpqrstuvwxyz]{20,}$") {
                     $writer.WriteLine($first)
                 }

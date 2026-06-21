@@ -6,12 +6,56 @@ cd "$ROOT"
 
 mkdir -p data dist logs .cache
 
+MIN_BALANCE_SPEC="${RNG_MIN_BALANCE:-}"
+PASSTHROUGH_ARGS=()
+for arg in "$@"; do
+  if [[ "$arg" =~ ^[0-9]+([.][0-9]+)?[bB][tT][cC]$ ]]; then
+    MIN_BALANCE_SPEC="$arg"
+  else
+    PASSTHROUGH_ARGS+=("$arg")
+  fi
+done
+set -- "${PASSTHROUGH_ARGS[@]}"
+
+parse_btc_sats() {
+  local spec="$1"
+  if [[ -z "$spec" ]]; then
+    printf '0\n'
+    return
+  fi
+  awk -v s="$spec" 'BEGIN {
+    sub(/[bB][tT][cC]$/, "", s)
+    if (s !~ /^[0-9]+(\.[0-9]+)?$/) exit 1
+    split(s, p, ".")
+    whole = p[1]
+    frac = (length(p) > 1) ? p[2] : ""
+    if (length(frac) > 8) frac = substr(frac, 1, 8)
+    while (length(frac) < 8) frac = frac "0"
+    printf "%.0f\n", whole * 100000000 + frac
+  }'
+}
+
+if ! MIN_BALANCE_SATS="$(parse_btc_sats "$MIN_BALANCE_SPEC")"; then
+  echo "Invalid balance filter '$MIN_BALANCE_SPEC'. Use values like 1btc or 10btc." >&2
+  exit 1
+fi
+if [[ -n "$MIN_BALANCE_SPEC" && "$MIN_BALANCE_SATS" -le 0 ]]; then
+  echo "Invalid balance filter '$MIN_BALANCE_SPEC'. Use values like 1btc or 10btc." >&2
+  exit 1
+fi
+
 REPO="${RNG_REPO:-github.com/alastorid/rng}"
 DATA_BRANCH="${RNG_DATA_BRANCH:-data}"
 DATA_WORKTREE=".cache/data-branch"
 DATA_ARCHIVE_DIR="$DATA_WORKTREE/data/blockchair_bitcoin_addresses_latest"
 EXTRACT_DIR="data/blockchair_bitcoin_addresses_latest_extracted"
-TARGETS_FILE="${RNG_TARGETS_FILE:-data/blockchair_bitcoin_addresses_latest_targets.txt}"
+if [[ -n "${RNG_TARGETS_FILE:-}" ]]; then
+  TARGETS_FILE="$RNG_TARGETS_FILE"
+elif [[ "$MIN_BALANCE_SATS" -gt 0 ]]; then
+  TARGETS_FILE="data/blockchair_bitcoin_addresses_latest_targets_min_${MIN_BALANCE_SATS}sats.txt"
+else
+  TARGETS_FILE="data/blockchair_bitcoin_addresses_latest_targets.txt"
+fi
 RELEASE_TAG="${RNG_RELEASE_TAG:-bitcrack-latest}"
 BACKEND="${RNG_BACKEND:-opencl}"
 KEYSPACE="${RNG_KEYSPACE:-}"
@@ -92,14 +136,30 @@ ensure_targets() {
   fi
 
   echo "Preparing BitCrack target address list..." >&2
+  if [[ "$MIN_BALANCE_SATS" -gt 0 ]]; then
+    echo "Filtering addresses with balance >= $MIN_BALANCE_SPEC ($MIN_BALANCE_SATS sats)..." >&2
+  fi
   mkdir -p "$(dirname "$TARGETS_FILE")"
   if [[ "$dump" == *.gz ]]; then
     gzip -cd "$dump"
   else
     cat "$dump"
   fi | awk -F '[,\t]' '
+    BEGIN {
+      minBalance = '"$MIN_BALANCE_SATS"'
+      balanceCol = 2
+    }
     {
       gsub(/\r/, "", $1)
+      if (NR == 1 && tolower($1) == "address") {
+        for (i = 1; i <= NF; i++) {
+          name = tolower($i)
+          if (name == "balance" || name == "balance_satoshi" || name == "balance_satoshis") balanceCol = i
+        }
+        next
+      }
+      balance = $(balanceCol) + 0
+      if (minBalance > 0 && balance < minBalance) next
       if ($1 ~ /^[13][123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{20,}$/ || $1 ~ /^bc1[023456789acdefghjklmnpqrstuvwxyz]{20,}$/) print $1
     }
   ' > "$TARGETS_FILE.tmp"
