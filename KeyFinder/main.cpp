@@ -54,6 +54,9 @@ struct RunConfig {
     secp256k1::uint256 stride = 1;
 
     bool follow = false;
+    bool selfTest = false;
+    secp256k1::uint256 selfTestPrivateKey = secp256k1::uint256("1");
+    unsigned int selfTestIndex = 0;
 };
 
 static RunConfig _config;
@@ -62,6 +65,19 @@ std::vector<DeviceManager::DeviceInfo> _devices;
 
 static uint64_t _runningTime = 0;
 static std::mutex _outputMutex;
+
+static std::string hash160ToString(const unsigned int hash[5])
+{
+    std::string s;
+
+    for(int i = 0; i < 5; i++) {
+        char buf[9] = { 0 };
+        sprintf(buf, "%.8X", hash[i]);
+        s += buf;
+    }
+
+    return s;
+}
 
 /**
 * Callback to display the private key
@@ -73,7 +89,7 @@ void resultCallback(KeySearchResult info)
 	if(_config.resultsFile.length() != 0) {
 		Logger::log(LogLevel::Info, "Found key for address '" + info.address + "'. Written to '" + _config.resultsFile + "'");
 
-		std::string s = info.address + " " + info.privateKey.toString(16) + " " + info.publicKey.toString(info.compressed);
+		std::string s = info.privateKey.toString(16) + " --> " + info.publicKey.toString(info.compressed) + " hash160=" + hash160ToString(info.hash) + " address=" + info.address;
 		util::appendToFile(_config.resultsFile, s);
 
 		return;
@@ -81,21 +97,15 @@ void resultCallback(KeySearchResult info)
 
 	std::string logStr = "Address:     " + info.address + "\n";
 	logStr += "Private key: " + info.privateKey.toString(16) + "\n";
+	logStr += "Public key:  " + info.publicKey.toString(info.compressed) + "\n";
+	logStr += "Hash160:     " + hash160ToString(info.hash) + "\n";
+	logStr += "Match:       " + info.privateKey.toString(16) + " --> " + info.publicKey.toString(info.compressed) + " (hash160 " + hash160ToString(info.hash) + ")\n";
 	logStr += "Compressed:  ";
 
 	if(info.compressed) {
 		logStr += "yes\n";
 	} else {
 		logStr += "no\n";
-	}
-
-	logStr += "Public key:  \n";
-
-	if(info.compressed) {
-		logStr += info.publicKey.toString(true) + "\n";
-	} else {
-		logStr += info.publicKey.x.toString(16) + "\n";
-		logStr += info.publicKey.y.toString(16) + "\n";
 	}
 
 	Logger::log(LogLevel::Info, logStr);
@@ -207,6 +217,7 @@ void usage()
     printf("                        Where START, END, COUNT are in hex format\n");
     printf("--stride N              Increment by N keys at a time\n");
     printf("--share M/N             Divide the keyspace into N equal shares, process the Mth share\n");
+    printf("--self-test             Inject a known island key and verify island->Bloom->CPU matching\n");
 }
 
 
@@ -276,7 +287,9 @@ static KeySearchDevice *getDeviceContext(DeviceManager::DeviceInfo &device, int 
 
 #ifdef BUILD_OPENCL
     if(device.type == DeviceManager::DeviceType::OpenCL) {
-        return new CLKeySearchDevice(device.physicalId, threads, pointsPerThread, blocks);
+        unsigned int selfTestKey[8] = { 0 };
+        _config.selfTestPrivateKey.exportWords(selfTestKey, 8, secp256k1::uint256::BigEndian);
+        return new CLKeySearchDevice(device.physicalId, threads, pointsPerThread, blocks, true, -2, -2, _config.selfTest, selfTestKey, _config.selfTestIndex);
     }
 #endif
 
@@ -339,6 +352,7 @@ static std::string getCompressionString(int mode)
 static int runDevice(DeviceManager::DeviceInfo device, int blocks, int threads, int pointsPerThread, const std::vector<KeySearchTarget> *loadedTargets)
 {
     std::string stage = "creating device context";
+    std::string deviceName = device.name.c_str();
 
     try {
         KeySearchDevice *d = getDeviceContext(device, blocks, threads, pointsPerThread);
@@ -366,15 +380,15 @@ static int runDevice(DeviceManager::DeviceInfo device, int blocks, int threads, 
     } catch(KeySearchException ex) {
         std::lock_guard<std::mutex> lock(_outputMutex);
         std::string msg = ex.msg.length() > 0 ? ex.msg : "no detail from lower layer";
-        Logger::log(LogLevel::Error, "Error on " + device.name + " while " + stage + ": " + msg);
+        Logger::log(LogLevel::Error, "Error on " + deviceName + " while " + stage + ": " + msg);
         return 1;
     } catch(std::exception &ex) {
         std::lock_guard<std::mutex> lock(_outputMutex);
-        Logger::log(LogLevel::Error, "Error on " + device.name + " while " + stage + ": " + std::string(ex.what()));
+        Logger::log(LogLevel::Error, "Error on " + deviceName + " while " + stage + ": " + std::string(ex.what()));
         return 1;
     } catch(...) {
         std::lock_guard<std::mutex> lock(_outputMutex);
-        Logger::log(LogLevel::Error, "Error on " + device.name + " while " + stage + ": unknown exception");
+        Logger::log(LogLevel::Error, "Error on " + deviceName + " while " + stage + ": unknown exception");
         return 1;
     }
 
@@ -407,6 +421,9 @@ int run()
     Logger::log(LogLevel::Info, "Compression: " + getCompressionString(_config.compression));
     Logger::log(LogLevel::Info, "Build: " + std::string(BITCRACK_BUILD_ID));
     Logger::log(LogLevel::Info, "OpenCL RNG devices: " + util::format((uint32_t)runDevices.size()));
+    if(_config.selfTest) {
+        Logger::log(LogLevel::Info, "OpenCL self-test: forcing Bloom path with injected island index " + util::format(_config.selfTestIndex));
+    }
 
     DeviceParameters params = getDefaultParameters(runDevices[0]);
 
@@ -562,6 +579,7 @@ int main(int argc, char **argv)
     parser.add("", "--keyspace", true);
     parser.add("", "--share", true);
     parser.add("", "--stride", true);
+    parser.add("", "--self-test", false);
 
     try {
         parser.parse(argc, argv);
@@ -645,6 +663,8 @@ int main(int argc, char **argv)
                 }
             } else if(optArg.equals("-f", "--follow")) {
                 _config.follow = true;
+            } else if(optArg.equals("", "--self-test")) {
+                _config.selfTest = true;
             }
 
 		} catch(std::string err) {
@@ -667,6 +687,27 @@ int main(int argc, char **argv)
 	// Parse operands
 	std::vector<std::string> ops = parser.getOperands();
 
+    if(_config.selfTest) {
+        secp256k1::ecpoint pubKey = secp256k1::multiplyPoint(_config.selfTestPrivateKey, secp256k1::G());
+        unsigned int hash[5];
+        unsigned int parsedHash[5];
+        std::string address = Address::fromPublicKey(pubKey, true);
+
+        Hash::hashPublicKeyCompressed(pubKey, hash);
+        Address::toHash160(address, parsedHash);
+
+        _config.targets.clear();
+        _config.targets.push_back(address);
+        _config.targetsFile = "";
+        _config.compression = PointCompressionType::COMPRESSED;
+
+        Logger::log(LogLevel::Info, "Self-test private key: " + _config.selfTestPrivateKey.toString(16));
+        Logger::log(LogLevel::Info, "Self-test public key: " + pubKey.toString(true));
+        Logger::log(LogLevel::Info, "Self-test hash160: " + hash160ToString(hash));
+        Logger::log(LogLevel::Info, "Self-test parsed hash160: " + hash160ToString(parsedHash));
+        Logger::log(LogLevel::Info, "Self-test address: " + address);
+    } else {
+
     // If there are no operands, then we must be reading from a file, otherwise
     // expect addresses on the commandline
 	if(ops.size() == 0) {
@@ -684,6 +725,7 @@ int main(int argc, char **argv)
 			_config.targets.push_back(ops[i]);
 		}
 	}
+    }
     
     // Calculate where to start and end in the keyspace when the --share option is used
     if(optShares) {
@@ -714,6 +756,9 @@ int main(int argc, char **argv)
 	} else if(optUncompressed) {
 		_config.compression = PointCompressionType::UNCOMPRESSED;
 	}
+    if(_config.selfTest) {
+        _config.compression = PointCompressionType::COMPRESSED;
+    }
 
     return run();
 }

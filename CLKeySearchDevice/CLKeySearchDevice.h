@@ -54,6 +54,9 @@ private:
     uint64_t _rngIslandSize = 4096;
     uint64_t _rngIslandOffset = 0;
     bool _rngIslandReady = false;
+    bool _selfTest = false;
+    unsigned int _selfTestIndex = 0;
+    unsigned int _selfTestKey[8] = { 0 };
     uint32_t _resultQueueCapacity = 65536;
     uint32_t _resultDrainThreshold = 4096;
     uint64_t _falsePositiveCount = 0;
@@ -122,7 +125,7 @@ private:
 
 public:
 
-    CLKeySearchDevice(uint64_t device, int threads, int pointsPerThread, int blocks = 0, bool rngMode = true, int rngOddBit = -2, int rngEvenBit = -2);
+    CLKeySearchDevice(uint64_t device, int threads, int pointsPerThread, int blocks = 0, bool rngMode = true, int rngOddBit = -2, int rngEvenBit = -2, bool selfTest = false, const unsigned int *selfTestKey = NULL, unsigned int selfTestIndex = 0);
     ~CLKeySearchDevice();
 
 

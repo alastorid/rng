@@ -424,6 +424,7 @@ void KeyFinder::run()
                 info.publicKey = results[i].publicKey;
 				info.compressed = results[i].compressed;
 				info.address = Address::fromPublicKey(results[i].publicKey, results[i].compressed);
+                memcpy(info.hash, results[i].hash, sizeof(info.hash));
 
 				_resultCallback(info);
 			}

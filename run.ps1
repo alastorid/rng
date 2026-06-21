@@ -91,6 +91,7 @@ $ReleaseTag = if ($env:RNG_RELEASE_TAG) { $env:RNG_RELEASE_TAG } else { "bitcrac
 $Backend = if ($env:RNG_BACKEND) { $env:RNG_BACKEND } else { "opencl" }
 $Keyspace = if ($env:RNG_KEYSPACE) { $env:RNG_KEYSPACE } else { "" }
 $OutFile = if ($env:RNG_OUT_FILE) { $env:RNG_OUT_FILE } else { "logs\hits.txt" }
+$SelfTestPrivateKey = "1"
 
 function Find-Dump {
     if (-not (Test-Path $ExtractDir)) {
@@ -370,6 +371,21 @@ if ($env:RNG_BIN) {
 else {
     Ensure-LatestAsset $Asset $Bin
 }
+$BinPath = (Resolve-Path $Bin).Path
+
+if ($env:RNG_SKIP_SELF_TEST -ne "1") {
+    Write-Host "Running OpenCL self-test..."
+    & $BinPath --self-test 2>&1 | ForEach-Object { Write-Host $_ }
+    if ($LASTEXITCODE -ne 0) {
+        throw "OpenCL self-test failed."
+    }
+
+    Write-Host "Running independent key verifier..."
+    & (Join-Path $Root "check.ps1") $SelfTestPrivateKey 2>&1 | ForEach-Object { Write-Host $_ }
+    if ($LASTEXITCODE -ne 0) {
+        throw "Independent key verifier failed."
+    }
+}
 
 $Dump = Ensure-Data
 $Targets = if ($env:RNG_TARGETS_FILE) { $env:RNG_TARGETS_FILE } else { $Dump }
@@ -392,5 +408,5 @@ if ($env:RNG_POINTS) {
 }
 $BitCrackArgs += $args
 
-Write-Host "Launching $Bin"
-& $Bin @BitCrackArgs
+Write-Host "Launching $BinPath"
+& $BinPath @BitCrackArgs

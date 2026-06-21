@@ -89,23 +89,54 @@ RELEASE_TAG="${RNG_RELEASE_TAG:-bitcrack-latest}"
 BACKEND="${RNG_BACKEND:-opencl}"
 KEYSPACE="${RNG_KEYSPACE:-}"
 OUT_FILE="${RNG_OUT_FILE:-logs/hits.txt}"
+PLATFORM="$(uname -s)-$(uname -m)"
+LOCAL_BUILD_FALLBACK=0
 
 if [[ -n "${RNG_BIN:-}" ]]; then
   ASSET_OPENCL=""
   BIN_OPENCL="$RNG_BIN"
 else
-  case "$(uname -s)-$(uname -m)" in
+  case "$PLATFORM" in
     Linux-x86_64)
       ASSET_OPENCL="clBitCrack-linux-x64"
       BIN_OPENCL="dist/clBitCrack"
       ;;
+    Darwin-arm64)
+      ASSET_OPENCL="clBitCrack-macos-arm64"
+      BIN_OPENCL="dist/clBitCrack"
+      LOCAL_BUILD_FALLBACK=1
+      ;;
+    Darwin-x86_64)
+      ASSET_OPENCL="clBitCrack-macos-x64"
+      BIN_OPENCL="dist/clBitCrack"
+      LOCAL_BUILD_FALLBACK=1
+      ;;
     *)
-      echo "run.sh currently supports Linux x86_64 prebuilt BitCrack assets." >&2
+      echo "run.sh supports Linux x86_64 and macOS OpenCL runs." >&2
       echo "On Windows, use run.ps1. To use a local binary here, set RNG_BIN=/path/to/clBitCrack." >&2
       exit 1
       ;;
   esac
 fi
+
+build_local_opencl() {
+  if ! command -v make >/dev/null 2>&1; then
+    echo "Cannot build local OpenCL binary because make is not installed." >&2
+    return 1
+  fi
+
+  echo "Building local OpenCL binary for $PLATFORM..." >&2
+  if [[ "$PLATFORM" == Darwin-* ]]; then
+    make BUILD_OPENCL=1 BUILD_CUDA=0 \
+      OPENCL_INCLUDE="${OPENCL_INCLUDE:-/System/Library/Frameworks/OpenCL.framework/Headers}" \
+      dir_keyfinder >&2
+  else
+    make BUILD_OPENCL=1 BUILD_CUDA=0 dir_keyfinder >&2
+  fi
+  mkdir -p "$(dirname "$BIN_OPENCL")"
+  cp bin/clBitCrack "$BIN_OPENCL"
+  chmod +x "$BIN_OPENCL"
+}
 
 find_dump() {
   if [[ ! -d "$EXTRACT_DIR" ]]; then
@@ -236,7 +267,7 @@ download_asset() {
       -o "$out"
   else
     echo "Cannot download private release asset. Install/authenticate GitHub CLI with 'gh auth login', or set GITHUB_TOKEN." >&2
-    exit 1
+    return 1
   fi
   chmod +x "$out"
 }
@@ -248,7 +279,7 @@ ensure_latest_asset() {
   local remote_version=""
   local local_version=""
 
-  if remote_version="$(get_asset_version "$asset" 2>/dev/null)"; then
+  if remote_version="$(get_asset_version "$asset" 2>/dev/null)" && [[ -n "$remote_version" ]]; then
     if [[ -f "$marker" ]]; then
       local_version="$(cat "$marker")"
     fi
@@ -266,6 +297,8 @@ ensure_latest_asset() {
       printf '%s\n' "$remote_version" > "$marker"
     elif [[ -x "$out" ]]; then
       echo "Could not update $asset; using existing $out." >&2
+    elif [[ "$LOCAL_BUILD_FALLBACK" == "1" ]] && build_local_opencl; then
+      echo "Built local OpenCL binary at $out." >&2
     else
       echo "Could not download $asset and no local binary exists at $out." >&2
       exit 1
@@ -275,7 +308,13 @@ ensure_latest_asset() {
 
   if [[ ! -x "$out" ]]; then
     echo "Downloading $asset from release '$RELEASE_TAG'..." >&2
-    download_asset "$asset" "$out"
+    if ! download_asset "$asset" "$out"; then
+      if [[ "$LOCAL_BUILD_FALLBACK" == "1" ]] && build_local_opencl; then
+        echo "Built local OpenCL binary at $out." >&2
+      else
+        exit 1
+      fi
+    fi
   else
     echo "Could not check release '$RELEASE_TAG' for updates; using existing $out." >&2
   fi

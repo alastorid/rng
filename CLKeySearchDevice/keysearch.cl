@@ -177,7 +177,7 @@ bool isInBloomFilter(unsigned int hash[5], __global unsigned int *targetList, ul
 
 bool checkHash(unsigned int hash[5], __global unsigned int *targetList, size_t numTargets, ulong mask)
 {
-    if(numTargets > 16) {
+    if(mask != 0) {
         return isInBloomFilter(hash, targetList, mask);
     } else {
         return isInList(hash, targetList, numTargets);

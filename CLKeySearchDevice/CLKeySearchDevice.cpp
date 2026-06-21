@@ -109,7 +109,7 @@ static void undoRMD160FinalRound(const unsigned int hIn[5], unsigned int hOut[5]
     }
 }
 
-CLKeySearchDevice::CLKeySearchDevice(uint64_t device, int threads, int pointsPerThread, int blocks, bool rngMode, int rngOddBit, int rngEvenBit)
+CLKeySearchDevice::CLKeySearchDevice(uint64_t device, int threads, int pointsPerThread, int blocks, bool rngMode, int rngOddBit, int rngEvenBit, bool selfTest, const unsigned int *selfTestKey, unsigned int selfTestIndex)
 {
     _threads = threads;
     _blocks = blocks;
@@ -118,8 +118,13 @@ CLKeySearchDevice::CLKeySearchDevice(uint64_t device, int threads, int pointsPer
     _rngMode = rngMode;
     _rngOddBit = rngOddBit;
     _rngEvenBit = rngEvenBit;
+    _selfTest = selfTest;
+    _selfTestIndex = selfTestIndex;
     _rngSeed = util::getSystemTime() ^ ((uint64_t)device << 32) ^ (uint64_t)_points;
 
+    if(_selfTest && selfTestKey != NULL) {
+        memcpy(_selfTestKey, selfTestKey, sizeof(_selfTestKey));
+    }
 
     if(threads <= 0 || threads % 32 != 0) {
         throw KeySearchException("The number of threads must be a multiple of 32");
@@ -243,8 +248,8 @@ void CLKeySearchDevice::allocateBuffers()
     // Multiplicaiton chain for batch inverse
     _chain = _clContext->malloc(size);
 
-    // Private keys for initialization
-    _privateKeys = _clContext->malloc(size, CL_MEM_READ_ONLY);
+    // RNG mode writes private keys on-device before the point initialization pass.
+    _privateKeys = _clContext->malloc(size, _rngMode ? CL_MEM_READ_WRITE : CL_MEM_READ_ONLY);
 
     // Lookup table for initialization
     _xTable = _clContext->malloc(256 * 8 * sizeof(unsigned int), CL_MEM_READ_ONLY);
@@ -377,7 +382,11 @@ void CLKeySearchDevice::doStep()
         }
         fflush(stdout);
 
-        getResultsInternal(false);
+        getResultsInternal(_selfTest);
+
+        if(_selfTest && _results.empty() && _iterations >= 4) {
+            throw KeySearchException("OpenCL self-test did not find the injected island key");
+        }
 
         if(_rngMode) {
             _rngIslandOffset++;
@@ -406,6 +415,7 @@ void CLKeySearchDevice::setTargetsList()
     _targetMemSize = count * 5 * sizeof(unsigned int);
     _deviceTargetList.ptr = _targets;
     _deviceTargetList.size = count;
+    _deviceTargetList.mask = 0;
 }
 
 void CLKeySearchDevice::setBloomFilter()
@@ -437,7 +447,7 @@ void CLKeySearchDevice::setTargetsInternal()
         _clContext->free(_deviceTargetList.ptr);
     }
 
-    if(_targetList.size() < 16) {
+    if(_targetList.size() < 16 && !_selfTest) {
         setTargetsList();
     } else {
         setBloomFilter();
@@ -760,6 +770,10 @@ void CLKeySearchDevice::generateRandomStartingPoints()
         _x,
         _y);
     _rngKernel->call(_blocks, _threads);
+
+    if(_selfTest) {
+        _clContext->copyHostToDevice(_selfTestKey, _privateKeys, (size_t)_selfTestIndex * 8 * sizeof(unsigned int), 8 * sizeof(unsigned int));
+    }
 
     for(int i = 0; i < 256; i++) {
         _initKeysKernel->set_args(_points, i, _privateKeys, _chain, _xTable, _yTable, _x, _y);

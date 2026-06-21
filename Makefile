@@ -28,6 +28,12 @@ OPENCL_LIB=${CUDA_LIB}
 OPENCL_INCLUDE=${CUDA_INCLUDE}
 OPENCL_VERSION=110
 
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+	OPENCL_LIB=
+	OPENCL_INCLUDE=/System/Library/Frameworks/OpenCL.framework/Headers
+endif
+
 export INCLUDE
 export LIBDIR
 export BINDIR
