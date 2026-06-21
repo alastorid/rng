@@ -24,6 +24,11 @@ struct TargetLoadOptions {
 	size_t balanceColumn = 1;
 };
 
+struct BatchParseResult {
+	std::vector<KeySearchTarget> targets;
+	uint64_t invalidRows = 0;
+};
+
 static std::vector<std::string> splitTargetColumns(const std::string &line)
 {
 	std::vector<std::string> columns;
@@ -60,13 +65,17 @@ static uint64_t parseBalanceSats(const std::vector<std::string> &columns, size_t
 		return 0;
 	}
 
-	return util::parseUInt64(balance);
+	try {
+		return util::parseUInt64(balance);
+	} catch(...) {
+		return 0;
+	}
 }
 
-static std::vector<KeySearchTarget> parseTargetBatch(std::vector<std::string> lines, uint64_t firstLine, TargetLoadOptions options)
+static BatchParseResult parseTargetBatch(std::vector<std::string> lines, uint64_t firstLine, TargetLoadOptions options)
 {
-	std::vector<KeySearchTarget> targets;
-	targets.reserve(lines.size());
+	BatchParseResult result;
+	result.targets.reserve(lines.size());
 
 	for(size_t i = 0; i < lines.size(); i++) {
 		std::string line = util::trim(lines[i]);
@@ -89,6 +98,10 @@ static std::vector<KeySearchTarget> parseTargetBatch(std::vector<std::string> li
 
 		std::string address = util::trim(columns[options.addressColumn]);
 		if(!Address::verifyAddress(address)) {
+			if(columns.size() > 1) {
+				result.invalidRows++;
+				continue;
+			}
 			if(firstLine > 0) {
 				throw KeySearchException("Invalid address '" + address + "' on line " + util::format((uint64_t)(firstLine + i)));
 			}
@@ -97,12 +110,12 @@ static std::vector<KeySearchTarget> parseTargetBatch(std::vector<std::string> li
 
 		KeySearchTarget t;
 		Address::toHash160(address, t.value);
-		targets.push_back(t);
+		result.targets.push_back(t);
 	}
 
-	sortUniqueTargets(targets);
+	sortUniqueTargets(result.targets);
 
-	return targets;
+	return result;
 }
 
 static void appendTargets(std::vector<KeySearchTarget> &dest, std::vector<KeySearchTarget> &src)
@@ -154,7 +167,7 @@ void KeyFinder::setTargets(std::vector<std::string> &targets)
 	_targets.clear();
 
 	TargetLoadOptions options;
-	_targets = parseTargetBatch(targets, 0, options);
+	_targets = parseTargetBatch(targets, 0, options).targets;
 
     _device->setTargets(_targets);
 }
@@ -190,9 +203,10 @@ std::vector<KeySearchTarget> KeyFinder::loadTargetsFromFile(std::string targetsF
 	}
 	size_t maxPending = (size_t)workers * 2;
 	std::vector<std::string> batch;
-	std::deque<std::future<std::vector<KeySearchTarget> > > pending;
+	std::deque<std::future<BatchParseResult> > pending;
 	TargetLoadOptions options;
 	options.minBalanceSats = getMinBalanceSats();
+	uint64_t invalidRows = 0;
 
 	Logger::log(LogLevel::Info, "Loading addresses from '" + targetsFile + "'");
 	Logger::log(LogLevel::Info, "Parsing targets with " + util::format((uint32_t)workers) + " CPU threads");
@@ -208,14 +222,32 @@ std::vector<KeySearchTarget> KeyFinder::loadTargetsFromFile(std::string targetsF
 
 		if(lineNumber == 1) {
 			std::vector<std::string> columns = splitTargetColumns(line);
-			if(columns.size() > 0 && util::toLower(util::trim(columns[0])) == "address") {
+			bool foundAddressHeader = false;
+			for(size_t i = 0; i < columns.size(); i++) {
+				std::string name = util::toLower(util::trim(columns[i]));
+				if(name == "address") {
+					options.addressColumn = i;
+					foundAddressHeader = true;
+				}
+				if(name == "balance" || name == "balance_satoshi" || name == "balance_satoshis") {
+					options.balanceColumn = i;
+				}
+			}
+			if(foundAddressHeader) {
+				Logger::log(LogLevel::Info, "Target columns: address=" + util::format((uint32_t)(options.addressColumn + 1))
+					+ ", balance=" + util::format((uint32_t)(options.balanceColumn + 1)));
+				continue;
+			}
+
+			if(columns.size() > 1) {
 				for(size_t i = 0; i < columns.size(); i++) {
-					std::string name = util::toLower(util::trim(columns[i]));
-					if(name == "balance" || name == "balance_satoshi" || name == "balance_satoshis") {
-						options.balanceColumn = i;
+					if(Address::verifyAddress(util::trim(columns[i]))) {
+						options.addressColumn = i;
+						Logger::log(LogLevel::Info, "Target columns inferred: address=" + util::format((uint32_t)(options.addressColumn + 1))
+							+ ", balance=" + util::format((uint32_t)(options.balanceColumn + 1)));
+						break;
 					}
 				}
-				continue;
 			}
 		}
 
@@ -228,9 +260,10 @@ std::vector<KeySearchTarget> KeyFinder::loadTargetsFromFile(std::string targetsF
 			batch.reserve(batchSize);
 
 			while(pending.size() >= maxPending) {
-				std::vector<KeySearchTarget> parsed = pending.front().get();
+				BatchParseResult parsed = pending.front().get();
 				pending.pop_front();
-				appendTargets(targets, parsed);
+				appendTargets(targets, parsed.targets);
+				invalidRows += parsed.invalidRows;
 			}
 		}
 	}
@@ -241,12 +274,16 @@ std::vector<KeySearchTarget> KeyFinder::loadTargetsFromFile(std::string targetsF
 	}
 
 	while(!pending.empty()) {
-		std::vector<KeySearchTarget> parsed = pending.front().get();
+		BatchParseResult parsed = pending.front().get();
 		pending.pop_front();
-		appendTargets(targets, parsed);
+		appendTargets(targets, parsed.targets);
+		invalidRows += parsed.invalidRows;
 	}
 
 	sortUniqueTargets(targets);
+	if(invalidRows > 0) {
+		Logger::log(LogLevel::Info, "Skipped " + util::formatThousands(invalidRows) + " invalid tabular target rows");
+	}
 
 	Logger::log(LogLevel::Info, util::formatThousands(targets.size()) + " addresses loaded ("
 		+ util::format("%.1f", (double)(sizeof(KeySearchTarget) * targets.size()) / (double)(1024 * 1024)) + "MB)");
