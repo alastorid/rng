@@ -12,6 +12,14 @@ CLUnitTests/test.cl
 
 # Linux build results
 *.o
+*.a
+*.bin
+*.exe
+*.dll
+*.so
+*.dylib
+lib/
+embedcl/embedcl
 
 # Runtime data and downloaded release assets
 .cache/
