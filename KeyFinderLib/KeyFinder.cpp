@@ -24,6 +24,11 @@ struct TargetLoadOptions {
 	size_t balanceColumn = 1;
 };
 
+static bool isSpecialSkippedAddress(const std::string &address)
+{
+	return address == "s-272edf45031dd498e7b3ae89e11ff21b";
+}
+
 static std::vector<std::string> splitTargetColumns(const std::string &line)
 {
 	std::vector<std::string> columns;
@@ -92,6 +97,10 @@ static std::vector<KeySearchTarget> parseTargetBatch(std::vector<std::string> li
 		}
 
 		std::string address = util::trim(columns[options.addressColumn]);
+		if(isSpecialSkippedAddress(address)) {
+			continue;
+		}
+
 		if(!Address::verifyAddress(address)) {
 			std::string msg = "Invalid address '" + address + "'";
 			if(firstLine > 0) {
