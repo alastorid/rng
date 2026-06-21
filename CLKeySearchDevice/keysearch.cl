@@ -117,12 +117,11 @@ __kernel void rngPrivateKeysKernel(
             }
         }
 
-        privateKeys[i] = k;
+        store256k(privateKeys, i, k);
 
-        for(int word = 0; word < 8; word++) {
-            xPtr[i].v[word] = 0xffffffffU;
-            yPtr[i].v[word] = 0xffffffffU;
-        }
+        uint256_t infinity = { {0xffffffffU, 0xffffffffU, 0xffffffffU, 0xffffffffU, 0xffffffffU, 0xffffffffU, 0xffffffffU, 0xffffffffU} };
+        store256k(xPtr, i, infinity);
+        store256k(yPtr, i, infinity);
     }
 }
 
@@ -217,8 +216,8 @@ __kernel void multiplyStepKernel(
     int gid = get_local_size(0) * get_group_id(0) + get_local_id(0);
     int dim = get_global_size(0);
 
-    gx = gxPtr[step];
-    gy = gyPtr[step];
+    gx = load256k(gxPtr, step);
+    gy = load256k(gyPtr, step);
 
     // Multiply together all (_Gx - x) and then invert
     uint256_t inverse = { {0,0,0,0,0,0,0,1} };
@@ -232,7 +231,7 @@ __kernel void multiplyStepKernel(
 
         unsigned int bit = p & (1 << (step % 32));
 
-        uint256_t x = xPtr[i];
+        uint256_t x = load256k(xPtr, i);
 
         if(bit != 0) {
             if(!isInfinity256k(x)) {
@@ -254,7 +253,7 @@ __kernel void multiplyStepKernel(
         p = readWord256k(privateKeys, i, 7 - step / 32);
         unsigned int bit = p & (1 << (step % 32));
 
-        uint256_t x = xPtr[i];
+        uint256_t x = load256k(xPtr, i);
         bool infinity = isInfinity256k(x);
 
         if(bit != 0) {
@@ -266,8 +265,8 @@ __kernel void multiplyStepKernel(
                 newY = gy;
             }
 
-            xPtr[i] = newX;
-            yPtr[i] = newY;
+            store256k(xPtr, i, newX);
+            store256k(yPtr, i, newY);
         }
     }
 }
@@ -349,8 +348,8 @@ void doIteration(
     int gid = get_local_size(0) * get_group_id(0) + get_local_id(0);
     int dim = get_global_size(0);
 
-    uint256_t incX = *incXPtr;
-    uint256_t incY = *incYPtr;
+    uint256_t incX = load256k(incXPtr, 0);
+    uint256_t incY = load256k(incYPtr, 0);
 
     // Multiply together all (_Gx - x) and then invert
     uint256_t inverse = { {0,0,0,0,0,0,0,1} };
@@ -362,10 +361,10 @@ void doIteration(
 
         unsigned int digest[5];
 
-        x = xPtr[i];
+        x = load256k(xPtr, i);
 
         if((compression == UNCOMPRESSED) || (compression == BOTH)) {
-            uint256_t y = yPtr[i];
+            uint256_t y = load256k(yPtr, i);
 
             hashPublicKey(x, y, digest);
 
@@ -379,7 +378,7 @@ void doIteration(
             hashPublicKeyCompressed(x, readLSW256k(yPtr, i), digest);
 
             if(checkHash(digest, targetList, numTargets, mask)) {
-                uint256_t y = yPtr[i];
+                uint256_t y = load256k(yPtr, i);
                 setResultFound(i, true, x, y, digest, results, numResults, maxResults, keyOffset);
             }
         }
@@ -399,8 +398,8 @@ void doIteration(
         batchIdx--;
         completeBatchAdd256k(incX, incY, xPtr, yPtr, i, batchIdx, chain, &inverse, &newX, &newY);
 
-        xPtr[i] = newX;
-        yPtr[i] = newY;
+        store256k(xPtr, i, newX);
+        store256k(yPtr, i, newY);
     }
 }
 
@@ -424,8 +423,8 @@ void doIterationWithDouble(
     int gid = get_local_size(0) * get_group_id(0) + get_local_id(0);
     int dim = get_global_size(0);
 
-    uint256_t incX = *incXPtr;
-    uint256_t incY = *incYPtr;
+    uint256_t incX = load256k(incXPtr, 0);
+    uint256_t incY = load256k(incYPtr, 0);
 
     // Multiply together all (_Gx - x) and then invert
     uint256_t inverse = { {0,0,0,0,0,0,0,1} };
@@ -437,11 +436,11 @@ void doIterationWithDouble(
 
         unsigned int digest[5];
 
-        x = xPtr[i];
+        x = load256k(xPtr, i);
 
         // uncompressed
         if((compression == UNCOMPRESSED) || (compression == BOTH)) {
-            uint256_t y = yPtr[i];
+            uint256_t y = load256k(yPtr, i);
             hashPublicKey(x, y, digest);
 
             if(checkHash(digest, targetList, numTargets, mask)) {
@@ -456,7 +455,7 @@ void doIterationWithDouble(
 
             if(checkHash(digest, targetList, numTargets, mask)) {
 
-                uint256_t y = yPtr[i];
+                uint256_t y = load256k(yPtr, i);
                 setResultFound(i, true, x, y, digest, results, numResults, maxResults, keyOffset);
             }
         }
@@ -475,8 +474,8 @@ void doIterationWithDouble(
         batchIdx--;
         completeBatchAddWithDouble256k(incX, incY, xPtr, yPtr, i, batchIdx, chain, &inverse, &newX, &newY);
 
-        xPtr[i] = newX;
-        yPtr[i] = newY;
+        store256k(xPtr, i, newX);
+        store256k(yPtr, i, newY);
     }
 }
 

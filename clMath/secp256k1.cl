@@ -7,6 +7,59 @@ typedef struct {
     uint v[8];
 }uint256_t;
 
+inline uint256_t make256k(uint4 lo, uint4 hi)
+{
+    uint256_t r;
+
+    r.v[0] = lo.s0;
+    r.v[1] = lo.s1;
+    r.v[2] = lo.s2;
+    r.v[3] = lo.s3;
+    r.v[4] = hi.s0;
+    r.v[5] = hi.s1;
+    r.v[6] = hi.s2;
+    r.v[7] = hi.s3;
+
+    return r;
+}
+
+inline uint4 lo4_256k(uint256_t x)
+{
+    return (uint4)(x.v[0], x.v[1], x.v[2], x.v[3]);
+}
+
+inline uint4 hi4_256k(uint256_t x)
+{
+    return (uint4)(x.v[4], x.v[5], x.v[6], x.v[7]);
+}
+
+inline uint256_t load256k(__global const uint256_t* ara, int idx)
+{
+    __global const uint4 *v = (__global const uint4 *)ara;
+    return make256k(v[idx * 2], v[idx * 2 + 1]);
+}
+
+inline void store256k(__global uint256_t* ara, int idx, uint256_t value)
+{
+    __global uint4 *v = (__global uint4 *)ara;
+    v[idx * 2] = lo4_256k(value);
+    v[idx * 2 + 1] = hi4_256k(value);
+}
+
+inline unsigned int wordFrom4(uint4 v, int word)
+{
+    switch(word & 3) {
+    case 0:
+        return v.s0;
+    case 1:
+        return v.s1;
+    case 2:
+        return v.s2;
+    default:
+        return v.s3;
+    }
+}
+
 
 /**
  Prime modulus 2^256 - 2^32 - 977
@@ -279,7 +332,7 @@ bool equal256k(uint256_t a, uint256_t b)
 
 inline uint256_t readInt256(__global const uint256_t* ara, int idx)
 {
-    return ara[idx];
+    return load256k(ara, idx);
 }
 
 /*
@@ -292,12 +345,14 @@ unsigned int readLSW(__global const unsigned int *ara, int idx)
 
 unsigned int readLSW256k(__global const uint256_t* ara, int idx)
 {
-    return ara[idx].v[7];
+    __global const uint4 *v = (__global const uint4 *)ara;
+    return v[idx * 2 + 1].s3;
 }
 
 unsigned int readWord256k(__global const uint256_t* ara, int idx, int word)
 {
-    return ara[idx].v[word];
+    __global const uint4 *v = (__global const uint4 *)ara;
+    return wordFrom4(v[idx * 2 + (word >> 2)], word);
 }
 
 unsigned int addP(const unsigned int a[8], unsigned int c[8])
@@ -568,7 +623,7 @@ void beginBatchAdd256k(uint256_t px, uint256_t x, __global uint256_t* chain, int
     // c[2] = diff2 * diff1 * diff0, etc
     *inverse = mulModP256k(*inverse, t);
 
-    chain[batchIdx * dim + gid] = *inverse;
+    store256k(chain, batchIdx * dim + gid, *inverse);
 }
 
 
@@ -577,7 +632,7 @@ void beginBatchAddWithDouble256k(uint256_t px, uint256_t py, __global uint256_t*
     int gid = get_local_size(0) * get_group_id(0) + get_local_id(0);
     int dim = get_global_size(0);
 
-    uint256_t x = xPtr[i];
+    uint256_t x = load256k(xPtr, i);
 
     if(equal256k(px, x)) {
         x = addModP256k(py, py);
@@ -590,7 +645,7 @@ void beginBatchAddWithDouble256k(uint256_t px, uint256_t py, __global uint256_t*
     // c[2] = diff2 * diff1 * diff0, etc
     *inverse = mulModP256k(x, *inverse);
 
-    chain[batchIdx * dim + gid] = *inverse;
+    store256k(chain, batchIdx * dim + gid, *inverse);
 }
 
 
@@ -612,14 +667,14 @@ void completeBatchAddWithDouble256k(
     uint256_t x;
     uint256_t y;
 
-    x = xPtr[i];
-    y = yPtr[i];
+    x = load256k(xPtr, i);
+    y = load256k(yPtr, i);
 
     if(batchIdx >= 1) {
 
         uint256_t c;
 
-        c = chain[(batchIdx - 1) * dim + gid];
+        c = load256k(chain, (batchIdx - 1) * dim + gid);
         s = mulModP256k(*inverse, c);
 
         uint256_t diff;
@@ -704,12 +759,12 @@ void completeBatchAdd256k(
     uint256_t s;
     uint256_t x;
 
-    x = xPtr[i];
+    x = load256k(xPtr, i);
 
     if(batchIdx >= 1) {
         uint256_t c;
 
-        c = chain[(batchIdx - 1) * dim + gid];
+        c = load256k(chain, (batchIdx - 1) * dim + gid);
         s = mulModP256k(*inverse, c);
 
         uint256_t diff;
@@ -720,7 +775,7 @@ void completeBatchAdd256k(
     }
 
     uint256_t y;
-    y = yPtr[i];
+    y = load256k(yPtr, i);
 
     uint256_t rise;
     rise = subModP256k(py, y);
