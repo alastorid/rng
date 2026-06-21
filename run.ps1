@@ -65,6 +65,13 @@ $env:RNG_MIN_BALANCE_SATS = "$MinBalanceSats"
 $env:RNG_BLOOM_LEVEL = "$BloomLevel"
 $env:RNG_ISLAND_LEVEL = "$IslandLevel"
 
+if ($MinBalanceSats -gt 0) {
+    Write-Host "Using target balance >= $MinBalanceSpec ($MinBalanceSats sats), bloom$BloomLevel, island$IslandLevel"
+}
+else {
+    Write-Host "Using all targets, bloom$BloomLevel, island$IslandLevel"
+}
+
 $Repo = if ($env:RNG_REPO) { $env:RNG_REPO } else { "github.com/alastorid/rng" }
 $ApiRepo = $Repo -replace "^github.com/", ""
 $DataBranch = if ($env:RNG_DATA_BRANCH) { $env:RNG_DATA_BRANCH } else { "data" }

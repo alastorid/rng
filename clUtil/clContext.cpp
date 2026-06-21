@@ -3,6 +3,7 @@
 #include <sstream>
 #include <cstring>
 #include <algorithm>
+#include <vector>
 
 #include "clContext.h"
 #include "util.h"
@@ -79,10 +80,15 @@ void cl::CLContext::memset(cl_mem devicePtr, unsigned char value, size_t size)
 #if CL_TARGET_OPENCL_VERSION >= 120
     clCall(clEnqueueFillBuffer(_queue, devicePtr, &value, sizeof(unsigned char), 0, size, NULL, NULL, NULL));
 #else
-    unsigned char *ptr = new unsigned char[size];
-    std::memset(ptr, value, size);
-    copyHostToDevice(ptr, devicePtr, 0, size);
-    delete[] ptr;
+    const size_t chunkSize = 16 * 1024 * 1024;
+    std::vector<unsigned char> chunk(std::min(size, chunkSize), value);
+    size_t offset = 0;
+
+    while(offset < size) {
+        size_t bytes = std::min(chunk.size(), size - offset);
+        copyHostToDevice(&chunk[0], devicePtr, offset, bytes);
+        offset += bytes;
+    }
 #endif
 }
 

@@ -147,7 +147,7 @@ CLKeySearchDevice::CLKeySearchDevice(uint64_t device, int threads, int pointsPer
 
         _deviceName = _clContext->getDeviceName();
     } catch(cl::CLException ex) {
-        throw KeySearchException(ex.msg);
+        throw KeySearchException("OpenCL setup failed: " + ex.msg);
     }
 
     _iterations = 0;
@@ -305,7 +305,7 @@ void CLKeySearchDevice::init(const secp256k1::uint256 &start, int compression, c
 
         setIncrementor(p);
     } catch(cl::CLException ex) {
-        throw KeySearchException(ex.msg);
+        throw KeySearchException("OpenCL initialization failed: " + ex.msg);
     }
 }
 
@@ -385,7 +385,7 @@ void CLKeySearchDevice::doStep()
 
         _iterations++;
     } catch(cl::CLException ex) {
-        throw KeySearchException(ex.msg);
+        throw KeySearchException("OpenCL step failed: " + ex.msg);
     }
 }
 
@@ -456,7 +456,7 @@ void CLKeySearchDevice::setTargets(const std::vector<KeySearchTarget> &targets)
 
         setTargetsInternal();
     } catch(cl::CLException ex) {
-        throw KeySearchException(ex.msg);
+        throw KeySearchException("OpenCL target upload failed: " + ex.msg);
     }
 }
 

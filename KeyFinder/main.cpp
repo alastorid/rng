@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <exception>
 #include <fstream>
 #include <iostream>
 #include <mutex>
@@ -414,6 +415,8 @@ void readCheckpointFile()
 
 static int runDevice(DeviceManager::DeviceInfo device, int blocks, int threads, int pointsPerThread)
 {
+    std::string stage = "creating device context";
+
     try {
         KeySearchDevice *d = getDeviceContext(device, blocks, threads, pointsPerThread);
 
@@ -423,20 +426,32 @@ static int runDevice(DeviceManager::DeviceInfo device, int blocks, int threads, 
         f.setStatusInterval(_config.statusInterval);
         f.setStatusCallback(statusCallback);
 
+        stage = "initializing device";
         f.init();
 
+        stage = "loading targets";
         if(!_config.targetsFile.empty()) {
             f.setTargets(_config.targetsFile);
         } else {
             f.setTargets(_config.targets);
         }
 
+        stage = "running search";
         f.run();
 
         delete d;
     } catch(KeySearchException ex) {
         std::lock_guard<std::mutex> lock(_outputMutex);
-        Logger::log(LogLevel::Info, "Error on " + device.name + ": " + ex.msg);
+        std::string msg = ex.msg.length() > 0 ? ex.msg : "no detail from lower layer";
+        Logger::log(LogLevel::Error, "Error on " + device.name + " while " + stage + ": " + msg);
+        return 1;
+    } catch(std::exception &ex) {
+        std::lock_guard<std::mutex> lock(_outputMutex);
+        Logger::log(LogLevel::Error, "Error on " + device.name + " while " + stage + ": " + std::string(ex.what()));
+        return 1;
+    } catch(...) {
+        std::lock_guard<std::mutex> lock(_outputMutex);
+        Logger::log(LogLevel::Error, "Error on " + device.name + " while " + stage + ": unknown exception");
         return 1;
     }
 

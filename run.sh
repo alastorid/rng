@@ -67,6 +67,12 @@ export RNG_MIN_BALANCE_SATS="$MIN_BALANCE_SATS"
 export RNG_BLOOM_LEVEL="$BLOOM_LEVEL"
 export RNG_ISLAND_LEVEL="$ISLAND_LEVEL"
 
+if [[ "$MIN_BALANCE_SATS" -gt 0 ]]; then
+  echo "Using target balance >= $MIN_BALANCE_SPEC ($MIN_BALANCE_SATS sats), bloom$BLOOM_LEVEL, island$ISLAND_LEVEL" >&2
+else
+  echo "Using all targets, bloom$BLOOM_LEVEL, island$ISLAND_LEVEL" >&2
+fi
+
 REPO="${RNG_REPO:-github.com/alastorid/rng}"
 DATA_BRANCH="${RNG_DATA_BRANCH:-data}"
 DATA_WORKTREE=".cache/data-branch"
