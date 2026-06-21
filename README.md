@@ -1,26 +1,156 @@
-# BitCrack
+# RNG
 
-A tool for brute-forcing Bitcoin private keys. The main purpose of this project is to contribute to the effort of solving the [Bitcoin puzzle transaction](https://blockchain.info/tx/08389f34c98c606322740c0be6a7125d9860bb8d5cb182c02f98461e5fa6cd15): A transaction with 32 addresses that become increasingly difficult to crack.
+RNG is an OpenCL-first Bitcoin address research runner. It loads a balance/address dataset, filters targets if requested, spreads work across all OpenCL devices, and runs the GPU RNG search path with device-side Bloom filtering.
 
-### One-command run scripts
+The normal entrypoint is the platform run script:
 
-`run.ps1` and `run.sh` prepare the runtime dataset from the `data` branch, download a prebuilt BitCrack binary from the `bitcrack-latest` release when one is not already present in `dist/`, convert supported P2PKH `1...` entries into the address list BitCrack expects, and launch the fast CUDA/OpenCL engine.
-
-Windows defaults to OpenCL:
-
-```
-.\run.ps1
+```sh
+./run.sh 1btc
 ```
 
-Linux defaults to OpenCL:
-
+```powershell
+.\run.ps1 1btc
 ```
+
+The scripts can run offline if the dataset and binary are already present. When network access is available, they can fetch/update the dataset from the `data` branch and update the prebuilt binary from the rolling release.
+
+## Quick Start
+
+Search all loaded targets:
+
+```sh
 ./run.sh
 ```
 
-Useful environment variables:
+Search only targets with at least 1 BTC:
 
+```sh
+./run.sh 1btc
 ```
+
+Use a different balance threshold:
+
+```sh
+./run.sh 10btc
+```
+
+Tune Bloom and island levels:
+
+```sh
+./run.sh 1btc bloom8 island6
+```
+
+Argument order does not matter:
+
+```sh
+./run.sh island6 bloom8 1btc
+```
+
+PowerShell accepts the same tokens:
+
+```powershell
+.\run.ps1 1btc bloom8 island6
+```
+
+## Script Parameters
+
+### BTC Balance Filter
+
+`1btc`, `10btc`, `0.5btc`, etc. filter dataset rows by balance during the multi-threaded load phase.
+
+Default behavior is to search all targets. Passing `1btc` means only rows with balance greater than or equal to `100,000,000` satoshis are loaded.
+
+Equivalent environment variable:
+
+```sh
+RNG_MIN_BALANCE=1btc ./run.sh
+```
+
+### Bloom Level
+
+`bloom0` through `bloom9` control the GPU Bloom filter size. The size scales with the number of loaded targets rather than being a fixed RAM amount.
+
+Higher Bloom levels:
+- use more VRAM
+- reduce false positives
+- reduce CPU follow-up work
+
+Lower Bloom levels:
+- use less VRAM
+- increase false positives
+- may slow the run if FP/s becomes high
+
+Default: `bloom8`.
+
+The status line reports false positives as `FP total/rate`, for example:
+
+```text
+FP 123/4.5s
+```
+
+Equivalent environment variable:
+
+```sh
+RNG_BLOOM_LEVEL=8 ./run.sh
+```
+
+### Island Level
+
+`island0` through `island9` control how many sequential steps are walked from each random island base.
+
+Higher island levels:
+- reduce random-base regeneration overhead
+- usually improve throughput
+- make each random base cover a larger local neighborhood
+
+Lower island levels:
+- refresh random bases more often
+- scatter work more aggressively
+- cost more overhead
+
+Default: `island4`, which is `65,536` steps. `island0` is the old `4,096` step size; each level doubles from there.
+
+Equivalent environment variable:
+
+```sh
+RNG_ISLAND_LEVEL=6 ./run.sh
+```
+
+## Recommended Runs
+
+Balanced default:
+
+```sh
+./run.sh 1btc
+```
+
+Try lower overhead:
+
+```sh
+./run.sh 1btc bloom8 island6
+```
+
+Try lower VRAM:
+
+```sh
+./run.sh 1btc bloom7 island6
+```
+
+If FP/s rises noticeably, move Bloom back up.
+
+## Runtime Notes
+
+RNG uses all OpenCL devices by default. On a dual-GPU machine, both GPUs are used and the displayed key rate is the combined rate from the active workers.
+
+If no OpenCL GPU is available, the OpenCL device discovery path can fall back to CPU OpenCL devices.
+
+The target loader parses the dataset once, in parallel, then shares the parsed target list with all OpenCL workers. It supports Base58, Bech32, and Bech32m address forms used by the current test corpus.
+
+The special parser test token `s-272edf45031dd498e7b3ae89e11ff21b` is intentionally skipped. Other invalid address values in the selected address column are fatal and include parser column context in the error message.
+
+## Useful Environment Variables
+
+```sh
 RNG_BACKEND=opencl
 RNG_RELEASE_TAG=bitcrack-latest
 RNG_KEYSPACE=START:END
@@ -28,187 +158,38 @@ RNG_DEVICE=0
 RNG_BLOCKS=32
 RNG_THREADS=256
 RNG_POINTS=256
-RNG_BIN=/path/to/local/cuBitCrack-or-clBitCrack
+RNG_BIN=/path/to/local/clBitCrack
+RNG_TARGETS_FILE=/path/to/targets-or-dump.tsv
+RNG_MIN_BALANCE=1btc
+RNG_BLOOM_LEVEL=8
+RNG_ISLAND_LEVEL=4
 ```
 
+## Building
 
-### Using BitCrack
+Linux OpenCL build:
 
-#### Usage
-
-
-Use `cuBitCrack.exe` for CUDA devices and `clBitCrack.exe` for OpenCL devices.
-
-### Note: **clBitCrack.exe is still EXPERIMENTAL**, as users have reported critial bugs when running on some AMD and Intel devices.
-
-**Note for Intel users:**
-
-There is bug in Intel's OpenCL implementation which affects BitCrack. Details here: https://github.com/brichard19/BitCrack/issues/123
-
-
-```
-xxBitCrack.exe [OPTIONS] [TARGETS]
-
-Where [TARGETS] are one or more Bitcoin address
-
-Options:
-
--i, --in FILE
-    Read addresses from FILE, one address per line. If FILE is "-" then stdin is read
-
--o, --out FILE
-    Append private keys to FILE, one per line
-
--d, --device N
-    Use device with ID equal to N
-
--b, --blocks BLOCKS
-    The number of CUDA blocks
-
--t, --threads THREADS
-    Threads per block
-
--p, --points NUMBER
-    Each thread will process NUMBER keys at a time
-
---keyspace KEYSPACE
-    Specify the range of keys to search, where KEYSPACE is in the format,
-
-	START:END start at key START, end at key END
-	START:+COUNT start at key START and end at key START + COUNT
-    :END start at key 1 and end at key END
-	:+COUNT start at key 1 and end at key 1 + COUNT
-
--c, --compressed
-    Search for compressed keys (default). Can be used with -u to also search uncompressed keys
-
--u, --uncompressed
-    Search for uncompressed keys, can be used with -c to search compressed keys
-
---compression MODE
-    Specify the compression mode, where MODE is 'compressed' or 'uncompressed' or 'both'
-
---list-devices
-    List available devices
-
---stride NUMBER
-    Increment by NUMBER
-
---share M/N
-    Divide the keyspace into N equal sized shares, process the Mth share
-
---continue FILE
-    Save/load progress from FILE
+```sh
+make BUILD_OPENCL=1 BUILD_CUDA=0
 ```
 
-#### Examples
+Windows builds are produced by the Visual Studio solution and the release workflow.
 
-The simplest usage, the keyspace will begin at 0, and the CUDA parameters will be chosen automatically
-```
-xxBitCrack.exe 1FshYsUh3mqgsG29XpZ23eLjWV8Ur3VwH
-```
+CUDA source is still present, but current RNG tuning work is OpenCL-first. The OpenCL path contains the current RNG island mode, all-device runner, Bloom levels, result batching, and target-loader updates.
 
-Multiple keys can be searched at once with minimal impact to performance. Provide the keys on the command line, or in a file with one address per line
-```
-xxBitCrack.exe 1FshYsUh3mqgsG29XpZ23eLjWV8Ur3VwH 15JhYXn6Mx3oF4Y7PcTAv2wVVAuCFFQNiP 19EEC52krRUK1RkUAEZmQdjTyHT7Gp1TYT
-```
+## Output
 
-To start the search at a specific private key, use the `--keyspace` option:
+Typical status line:
 
-```
-xxBitCrack.exe --keyspace 766519C977831678F0000000000 1FshYsUh3mqgsG29XpZ23eLjWV8Ur3VwH
+```text
+Tesla M40 24GB   3030 / 24506MB | 56533653 targets 7.07 MKey/s (279,445,504 total) FP 123/4.5s [00:24:41]
 ```
 
-The `--keyspace` option can also be used to search a specific range:
-
-```
-xxBitCrack.exe --keyspace 80000000:ffffffff 1FshYsUh3mqgsG29XpZ23eLjWV8Ur3VwH
-```
-
-To periodically save progress, the `--continue` option can be used. This is useful for recovering
-after an unexpected interruption:
-
-```
-xxBitCrack.exe --keyspace 80000000:ffffffff 1FshYsUh3mqgsG29XpZ23eLjWV8Ur3VwH
-...
-GeForce GT 640   224/1024MB | 1 target 10.33 MKey/s (1,244,659,712 total) [00:01:58]
-^C
-xxBitCrack.exe --keyspace 80000000:ffffffff 1FshYsUh3mqgsG29XpZ23eLjWV8Ur3VwH
-...
-GeForce GT 640   224/1024MB | 1 target 10.33 MKey/s (1,357,905,920 total) [00:02:12]
-```
-
-
-Use the `-b,` `-t` and `-p` options to specify the number of blocks, threads per block, and keys per thread.
-```
-xxBitCrack.exe -b 32 -t 256 -p 16 1FshYsUh3mqgsG29XpZ23eLjWV8Ur3VwH
-```
-
-### Choosing the right parameters for your device
-
-GPUs have many cores. Work for the cores is divided into blocks. Each block contains threads.
-
-There are 3 parameters that affect performance: blocks, threads per block, and keys per thread.
-
-
-`blocks:` Should be a multiple of the number of compute units on the device. The default is 32.
-
-`threads:` The number of threads in a block. This must be a multiple of 32. The default is 256.
-
-`Keys per thread:` The number of keys each thread will process. The performance (keys per second)
-increases asymptotically with this value. The default is256. Increasing this value will cause the
-kernel to run longer, but more keys will be processed.
-
-
-### Build dependencies
-
-Visual Studio 2019 (if on Windows)
-
-For CUDA: CUDA Toolkit 10.1
-
-For OpenCL: An OpenCL SDK (The CUDA toolkit contains an OpenCL SDK).
-
-
-### Building in Windows
-
-Open the Visual Studio solution.
-
-Build the `clKeyFinder` project for an OpenCL build.
-
-Build the `cuKeyFinder` project for a CUDA build.
-
-Note: By default the NVIDIA OpenCL headers are used. You can set the header and library path for
-OpenCL in the `BitCrack.props` property sheet.
-
-### Building in Linux
-
-Using `make`:
-
-Build CUDA:
-```
-make BUILD_CUDA=1
-```
-
-Build OpenCL:
-```
-make BUILD_OPENCL=1
-```
-
-Or build both:
-```
-make BUILD_CUDA=1 BUILD_OPENCL=1
-```
-
-### Supporting this project
-
-If you find this project useful and would like to support it, consider making a donation. Your support is greatly appreciated!
-
-**BTC**: `1LqJ9cHPKxPXDRia4tteTJdLXnisnfHsof`
-
-**LTC**: `LfwqkJY7YDYQWqgR26cg2T1F38YyojD67J`
-
-**ETH**: `0xd28082CD48E1B279425346E8f6C651C45A9023c5`
-
-### Contact
-
-Send any questions or comments to bitcrack.project@gmail.com
+Fields:
+- device name
+- used/total device memory
+- loaded target count
+- combined key rate
+- total keys attempted
+- false positive count/rate
+- elapsed time
