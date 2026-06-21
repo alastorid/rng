@@ -51,6 +51,7 @@ private:
     int _rngOddBit = -1;
     int _rngEvenBit = -1;
     unsigned int _rngSeed[8] = { 0 };
+    secp256k1::uint256 _rngIslandStride = 1;
     uint64_t _rngIslandSize = 4096;
     uint64_t _rngIslandOffset = 0;
     bool _rngIslandReady = false;

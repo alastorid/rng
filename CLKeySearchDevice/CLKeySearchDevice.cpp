@@ -112,6 +112,25 @@ static void secureRandomBytes(unsigned char *buf, size_t count)
 #endif
 }
 
+static secp256k1::uint256 secureRandomScalar()
+{
+    while(true) {
+        unsigned int words[8];
+        secureRandomBytes((unsigned char *)words, sizeof(words));
+
+        secp256k1::uint256 k(words, secp256k1::uint256::LittleEndian);
+
+        if(!k.isZero() && k.cmp(secp256k1::N) < 0) {
+            return k;
+        }
+    }
+}
+
+static secp256k1::uint256 getSelfTestIslandStride()
+{
+    return secp256k1::uint256("123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0");
+}
+
 typedef struct {
     int idx;
     bool compressed;
@@ -334,6 +353,7 @@ void CLKeySearchDevice::init(const secp256k1::uint256 &start, int compression, c
             _rngIslandSize = getIslandSteps(islandLevel);
             Logger::log(LogLevel::Info, "OpenCL RNG island mode enabled");
             Logger::log(LogLevel::Info, "RNG stream: OS CSPRNG seed + ChaCha20 on GPU");
+            Logger::log(LogLevel::Info, "RNG island walk: randomized scalar stride");
             Logger::log(LogLevel::Info, "RNG island size: " + util::formatThousands(_rngIslandSize) + " steps, island" + util::format((uint32_t)islandLevel));
             _rngIslandOffset = 0;
             _rngIslandReady = false;
@@ -621,7 +641,8 @@ void CLKeySearchDevice::getResultsInternal(bool force)
             uint64_t keyOffset = ((uint64_t)ptr[i].keyOffsetHi << 32) | (uint64_t)ptr[i].keyOffsetLo;
 
             if(_rngMode) {
-                privateKey = secp256k1::addModN(readBigInt(rngPrivateKeys, ptr[i].idx), secp256k1::uint256(keyOffset));
+                secp256k1::uint256 offset = secp256k1::multiplyModN(_rngIslandStride, secp256k1::uint256(keyOffset));
+                privateKey = secp256k1::addModN(readBigInt(rngPrivateKeys, ptr[i].idx), offset);
             } else {
                 // Calculate the private key based on the number of iterations and the current thread
                 secp256k1::uint256 offset = secp256k1::uint256((uint64_t)_points * keyOffset) + secp256k1::uint256(ptr[i].idx) * _stride;
@@ -798,6 +819,12 @@ void CLKeySearchDevice::generateStartingPoints()
 
 void CLKeySearchDevice::generateRandomStartingPoints()
 {
+    secp256k1::ecpoint g = secp256k1::G();
+
+    _rngIslandStride = _selfTest ? getSelfTestIslandStride() : secureRandomScalar();
+    secp256k1::ecpoint islandIncrementor = secp256k1::multiplyPoint(_rngIslandStride, g);
+    setIncrementor(islandIncrementor);
+
     _rngKernel->set_args(
         _points,
         (cl_ulong)_iterations,
@@ -810,7 +837,14 @@ void CLKeySearchDevice::generateRandomStartingPoints()
     _rngKernel->call(_blocks, _threads);
 
     if(_selfTest) {
-        _clContext->copyHostToDevice(_selfTestKey, _privateKeys, (size_t)_selfTestIndex * 8 * sizeof(unsigned int), 8 * sizeof(unsigned int));
+        const uint64_t selfTestOffset = 3;
+        secp256k1::uint256 targetKey(_selfTestKey, secp256k1::uint256::BigEndian);
+        secp256k1::uint256 offset = secp256k1::multiplyModN(_rngIslandStride, secp256k1::uint256(selfTestOffset));
+        secp256k1::uint256 injectedKey = secp256k1::subModN(targetKey, offset);
+        unsigned int injectedWords[8];
+
+        injectedKey.exportWords(injectedWords, 8, secp256k1::uint256::BigEndian);
+        _clContext->copyHostToDevice(injectedWords, _privateKeys, (size_t)_selfTestIndex * 8 * sizeof(unsigned int), 8 * sizeof(unsigned int));
     }
 
     for(int i = 0; i < 256; i++) {
