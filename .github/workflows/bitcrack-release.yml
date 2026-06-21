@@ -88,32 +88,12 @@ jobs:
           name: clBitCrack-macos-arm64
           path: release/clBitCrack-macos-arm64
 
-  macos-opencl-x64:
-    name: Build macOS x64 OpenCL
-    runs-on: macos-13
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Build clBitCrack
-        run: |
-          make BUILD_OPENCL=1 BUILD_CUDA=0 dir_keyfinder
-          mkdir -p release
-          cp bin/clBitCrack release/clBitCrack-macos-x64
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: clBitCrack-macos-x64
-          path: release/clBitCrack-macos-x64
-
   publish:
     name: Publish Release
     needs:
       - windows-opencl
       - linux-opencl
       - macos-opencl-arm64
-      - macos-opencl-x64
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
