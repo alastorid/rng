@@ -16,27 +16,31 @@ std::vector<cl::CLDeviceInfo> cl::getDevices()
 
     cl_uint platformCount = 0;
 
-    clCall(clGetPlatformIDs(0, NULL, &platformCount));
-
-    if(platformCount == 0) {
+    cl_int err = clGetPlatformIDs(0, NULL, &platformCount);
+    if(err != CL_SUCCESS || platformCount == 0) {
         return gpuDevices;
     }
 
-    cl_platform_id* platforms = new cl_platform_id[platformCount];
-
-    clCall(clGetPlatformIDs(platformCount, platforms, NULL));
+    std::vector<cl_platform_id> platforms(platformCount);
+    err = clGetPlatformIDs(platformCount, &platforms[0], NULL);
+    if(err != CL_SUCCESS) {
+        return gpuDevices;
+    }
 
     for(cl_uint i = 0; i < platformCount; i++) {
-        
         cl_uint deviceCount = 0;
-        clCall(clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, 0, NULL, &deviceCount));
+        err = clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, 0, NULL, &deviceCount);
 
-        if(deviceCount == 0) {
+        if(err != CL_SUCCESS || deviceCount == 0) {
             continue;
         }
 
-        cl_device_id* devices = new cl_device_id[deviceCount];
-        clCall(clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, deviceCount, devices, NULL));
+        std::vector<cl_device_id> devices(deviceCount);
+        err = clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, deviceCount, &devices[0], NULL);
+
+        if(err != CL_SUCCESS) {
+            continue;
+        }
 
         for(cl_uint j = 0; j < deviceCount; j++) {
             char buf[256] = {0};
@@ -44,21 +48,33 @@ std::vector<cl::CLDeviceInfo> cl::getDevices()
             cl::CLDeviceInfo info;
             size_t size;
             // Get device name
-            clCall(clGetDeviceInfo(devices[j], CL_DEVICE_NAME, sizeof(buf), buf, &size));
+            err = clGetDeviceInfo(devices[j], CL_DEVICE_NAME, sizeof(buf), buf, &size);
+            if(err != CL_SUCCESS) {
+                continue;
+            }
 
             info.name = std::string(buf, size);
 
             cl_device_type type = 0;
-            clCall(clGetDeviceInfo(devices[j], CL_DEVICE_TYPE, sizeof(type), &type, NULL));
+            err = clGetDeviceInfo(devices[j], CL_DEVICE_TYPE, sizeof(type), &type, NULL);
+            if(err != CL_SUCCESS) {
+                continue;
+            }
             info.type = type;
 
             int cores = 0;
-            clCall(clGetDeviceInfo(devices[j], CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(cores), &cores, NULL));
+            err = clGetDeviceInfo(devices[j], CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(cores), &cores, NULL);
+            if(err != CL_SUCCESS) {
+                continue;
+            }
 
             info.cores = cores;
 
             cl_ulong mem;
-            clCall(clGetDeviceInfo(devices[j], CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(mem), &mem, NULL));
+            err = clGetDeviceInfo(devices[j], CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(mem), &mem, NULL);
+            if(err != CL_SUCCESS) {
+                continue;
+            }
 
             info.mem = (uint64_t)mem;
             info.id = devices[j];
@@ -68,11 +84,7 @@ std::vector<cl::CLDeviceInfo> cl::getDevices()
                 cpuDevices.push_back(info);
             }
         }
-
-        delete[] devices;
     }
-
-    delete[] platforms;
 
     if(gpuDevices.size() > 0) {
         return gpuDevices;

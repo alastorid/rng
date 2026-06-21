@@ -1,4 +1,5 @@
 #include "DeviceManager.h"
+#include <sstream>
 
 #ifdef BUILD_CUDA
 #include "cudaUtil.h"
@@ -13,6 +14,7 @@ std::vector<DeviceManager::DeviceInfo> DeviceManager::getDevices()
     int deviceId = 0;
 
     std::vector<DeviceManager::DeviceInfo> devices;
+    std::vector<std::string> warnings;
 
 #ifdef BUILD_CUDA
     // Get CUDA devices
@@ -32,7 +34,7 @@ std::vector<DeviceManager::DeviceInfo> DeviceManager::getDevices()
             deviceId++;
         }
     } catch(cuda::CudaException ex) {
-        throw DeviceManager::DeviceManagerException(ex.msg);
+        warnings.push_back("CUDA: " + ex.msg);
     }
 #endif
 
@@ -53,9 +55,21 @@ std::vector<DeviceManager::DeviceInfo> DeviceManager::getDevices()
             deviceId++;
         }
     } catch(cl::CLException ex) {
-        throw DeviceManager::DeviceManagerException(ex.msg);
+        warnings.push_back("OpenCL: " + ex.msg);
     }
 #endif
+
+    if(devices.size() == 0 && warnings.size() > 0) {
+        std::ostringstream msg;
+        msg << "No usable compute devices found";
+
+        for(size_t i = 0; i < warnings.size(); i++) {
+            msg << (i == 0 ? " (" : "; ") << warnings[i];
+        }
+
+        msg << ")";
+        throw DeviceManager::DeviceManagerException(msg.str());
+    }
 
     return devices;
 }
