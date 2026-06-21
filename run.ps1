@@ -90,7 +90,6 @@ else {
 $ReleaseTag = if ($env:RNG_RELEASE_TAG) { $env:RNG_RELEASE_TAG } else { "bitcrack-latest" }
 $Backend = if ($env:RNG_BACKEND) { $env:RNG_BACKEND } else { "opencl" }
 $Keyspace = if ($env:RNG_KEYSPACE) { $env:RNG_KEYSPACE } else { "" }
-$ContinueFile = if ($env:RNG_CONTINUE_FILE) { $env:RNG_CONTINUE_FILE } else { "logs\bitcrack-$Backend.continue" }
 $OutFile = if ($env:RNG_OUT_FILE) { $env:RNG_OUT_FILE } else { "logs\hits.txt" }
 
 function Find-Dump {
@@ -375,7 +374,7 @@ else {
 $Dump = Ensure-Data
 $Targets = if ($env:RNG_TARGETS_FILE) { $env:RNG_TARGETS_FILE } else { $Dump }
 
-$BitCrackArgs = @("--compressed", "--continue", $ContinueFile, "-i", $Targets, "-o", $OutFile)
+$BitCrackArgs = @("--compressed", "-i", $Targets, "-o", $OutFile)
 if ($Keyspace) {
     $BitCrackArgs += @("--keyspace", $Keyspace)
 }

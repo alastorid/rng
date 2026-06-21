@@ -88,7 +88,6 @@ fi
 RELEASE_TAG="${RNG_RELEASE_TAG:-bitcrack-latest}"
 BACKEND="${RNG_BACKEND:-opencl}"
 KEYSPACE="${RNG_KEYSPACE:-}"
-CONTINUE_FILE="${RNG_CONTINUE_FILE:-logs/bitcrack-${BACKEND}.continue}"
 OUT_FILE="${RNG_OUT_FILE:-logs/hits.txt}"
 
 if [[ -n "${RNG_BIN:-}" ]]; then
@@ -305,7 +304,7 @@ fi
 DUMP="$(ensure_data)"
 TARGETS="${RNG_TARGETS_FILE:-$DUMP}"
 
-ARGS=(--compressed --continue "$CONTINUE_FILE" -i "$TARGETS" -o "$OUT_FILE")
+ARGS=(--compressed -i "$TARGETS" -o "$OUT_FILE")
 if [[ -n "$KEYSPACE" ]]; then
   ARGS+=(--keyspace "$KEYSPACE")
 fi

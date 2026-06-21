@@ -366,7 +366,6 @@ void KeyFinder::run()
 	timer.start();
 
 	uint64_t prevIterCount = 0;
-	uint64_t prevFalsePositiveCount = 0;
 
 	_totalTime = 0;
 
@@ -405,14 +404,12 @@ void KeyFinder::run()
 			info.deviceName = _device->getDeviceName();
 			info.targets = _targets.size();
 			info.falsePositives = _device->getFalsePositiveCount();
-			info.falsePositiveRate = (double)(info.falsePositives - prevFalsePositiveCount) / seconds;
             info.nextKey = getNextKey();
 
 			_statusCallback(info);
 
 			timer.start();
 			prevIterCount = _iterCount;
-			prevFalsePositiveCount = info.falsePositives;
 			_totalTime += t;
 		}
 

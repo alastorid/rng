@@ -16,7 +16,7 @@ namespace Base58 {
 
 	void toHash160(const std::string &s, unsigned int hash[5]);
 
-	bool isBase58(std::string s);
+	bool isBase58(const std::string &s);
 };
 
 

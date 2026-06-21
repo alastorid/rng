@@ -84,10 +84,10 @@ Lower Bloom levels:
 
 Default: `bloom8`.
 
-The status line reports false positives as `FP total/rate`, for example:
+The status line reports false positives as a total count, for example:
 
 ```text
-FP 123/4.5s
+FP 123
 ```
 
 Equivalent environment variable:
@@ -184,7 +184,7 @@ CUDA source is still present, but current RNG tuning work is OpenCL-first. The O
 Typical status line:
 
 ```text
-Tesla M40 24GB   3030 / 24506MB | 56533653 targets 7.07 MKey/s (279,445,504 total) FP 123/4.5s [00:24:41]
+Tesla M40 24GB   3030 / 24506MB | 56533653 targets 7.07 MKey/s (279,445,504 total) FP 123 [00:24:41]
 ```
 
 Fields:

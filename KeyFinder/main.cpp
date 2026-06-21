@@ -15,7 +15,6 @@
 #include "secp256k1.h"
 #include "CmdParse.h"
 #include "Logger.h"
-#include "ConfigFile.h"
 
 #include "DeviceManager.h"
 
@@ -28,10 +27,8 @@
 #endif
 
 struct RunConfig {
-    // startKey is the first key. We store it so that if the --continue
-    // option is used, the correct progress is displayed. startKey and
-    // nextKey are only equal at the very beginning. nextKey gets saved
-    // in the checkpoint file.
+    // startKey is the first key. nextKey is advanced when keyspace sharing
+    // selects this worker's slice.
     secp256k1::uint256 startKey = 1;
     secp256k1::uint256 nextKey = 1;
 
@@ -39,7 +36,6 @@ struct RunConfig {
     secp256k1::uint256 endKey = secp256k1::N - 1;
 
     uint64_t statusInterval = 1800;
-    uint64_t checkpointInterval = 60000;
 
     unsigned int threads = 0;
     unsigned int blocks = 0;
@@ -51,14 +47,10 @@ struct RunConfig {
 
     std::string targetsFile = "";
 
-    std::string checkpointFile = "";
-
     int device = 0;
 
     std::string resultsFile = "";
 
-    uint64_t totalkeys = 0;
-    unsigned int elapsed = 0;
     secp256k1::uint256 stride = 1;
 
     bool follow = false;
@@ -68,11 +60,7 @@ static RunConfig _config;
 
 std::vector<DeviceManager::DeviceInfo> _devices;
 
-void writeCheckpoint(secp256k1::uint256 nextKey);
-
-static uint64_t _lastUpdate = 0;
 static uint64_t _runningTime = 0;
-static uint64_t _startTime = 0;
 static std::mutex _outputMutex;
 
 /**
@@ -128,11 +116,11 @@ void statusCallback(KeySearchStatus info)
 		speedStr = util::format("%.2f", info.speed) + " MKey/s";
 	}
 
-    std::string totalStr = "(" + util::formatThousands(_config.totalkeys + info.total) + " total)";
+    std::string totalStr = "(" + util::formatThousands(info.total) + " total)";
 
-    std::string fpStr = "FP " + util::formatThousands(info.falsePositives) + "/" + util::format("%.1f", info.falsePositiveRate) + "s";
+    std::string fpStr = "FP " + util::formatThousands(info.falsePositives);
 
-	std::string timeStr = "[" + util::formatSeconds((unsigned int)((_config.elapsed + info.totalTime) / 1000)) + "]";
+	std::string timeStr = "[" + util::formatSeconds((unsigned int)(info.totalTime / 1000)) + "]";
 
 	std::string usedMemStr = util::format((info.deviceMemory - info.freeMemory) /(1024 * 1024));
 
@@ -154,15 +142,6 @@ void statusCallback(KeySearchStatus info)
     }
 
 	printf(formatStr, devName.c_str(), usedMemStr.c_str(), totalMemStr.c_str(), targetStr.c_str(), speedStr.c_str(), totalStr.c_str(), fpStr.c_str(), timeStr.c_str());
-
-    if(_config.checkpointFile.length() > 0) {
-        uint64_t t = util::getSystemTime();
-        if(t - _lastUpdate >= _config.checkpointInterval) {
-            Logger::log(LogLevel::Info, "Checkpoint");
-            writeCheckpoint(info.nextKey);
-            _lastUpdate = t;
-        }
-    }
 }
 
 /**
@@ -228,7 +207,6 @@ void usage()
     printf("                        Where START, END, COUNT are in hex format\n");
     printf("--stride N              Increment by N keys at a time\n");
     printf("--share M/N             Divide the keyspace into N equal shares, process the Mth share\n");
-    printf("--continue FILE         Save/load progress from FILE\n");
 }
 
 
@@ -358,65 +336,6 @@ static std::string getCompressionString(int mode)
     throw std::string("Invalid compression setting '" + util::format(mode) + "'");
 }
 
-void writeCheckpoint(secp256k1::uint256 nextKey)
-{
-    std::ofstream tmp(_config.checkpointFile, std::ios::out);
-
-    tmp << "start=" << _config.startKey.toString() << std::endl;
-    tmp << "next=" << nextKey.toString() << std::endl;
-    tmp << "end=" << _config.endKey.toString() << std::endl;
-    tmp << "blocks=" << _config.blocks << std::endl;
-    tmp << "threads=" << _config.threads << std::endl;
-    tmp << "points=" << _config.pointsPerThread << std::endl;
-    tmp << "compression=" << getCompressionString(_config.compression) << std::endl;
-    tmp << "device=" << _config.device << std::endl;
-    tmp << "elapsed=" << (_config.elapsed + util::getSystemTime() - _startTime) << std::endl;
-    tmp << "stride=" << _config.stride.toString();
-    tmp.close();
-}
-
-void readCheckpointFile()
-{
-    if(_config.checkpointFile.length() == 0) {
-        return;
-    }
-
-    ConfigFileReader reader(_config.checkpointFile);
-
-    if(!reader.exists()) {
-        return;
-    }
-
-    Logger::log(LogLevel::Info, "Loading ' " + _config.checkpointFile + "'");
-
-    std::map<std::string, ConfigFileEntry> entries = reader.read();
-
-    _config.startKey = secp256k1::uint256(entries["start"].value);
-    _config.nextKey = secp256k1::uint256(entries["next"].value);
-    _config.endKey = secp256k1::uint256(entries["end"].value);
-
-    if(_config.threads == 0 && entries.find("threads") != entries.end()) {
-        _config.threads = util::parseUInt32(entries["threads"].value);
-    }
-    if(_config.blocks == 0 && entries.find("blocks") != entries.end()) {
-        _config.blocks = util::parseUInt32(entries["blocks"].value);
-    }
-    if(_config.pointsPerThread == 0 && entries.find("points") != entries.end()) {
-        _config.pointsPerThread = util::parseUInt32(entries["points"].value);
-    }
-    if(entries.find("compression") != entries.end()) {
-        _config.compression = parseCompressionString(entries["compression"].value);
-    }
-    if(entries.find("elapsed") != entries.end()) {
-        _config.elapsed = util::parseUInt32(entries["elapsed"].value);
-    }
-    if(entries.find("stride") != entries.end()) {
-        _config.stride = util::parseUInt64(entries["stride"].value);
-    }
-
-    _config.totalkeys = (_config.nextKey - _config.startKey).toUint64();
-}
-
 static int runDevice(DeviceManager::DeviceInfo device, int blocks, int threads, int pointsPerThread, const std::vector<KeySearchTarget> *loadedTargets)
 {
     std::string stage = "creating device context";
@@ -488,9 +407,6 @@ int run()
     Logger::log(LogLevel::Info, "Compression: " + getCompressionString(_config.compression));
     Logger::log(LogLevel::Info, "Build: " + std::string(BITCRACK_BUILD_ID));
     Logger::log(LogLevel::Info, "OpenCL RNG devices: " + util::format((uint32_t)runDevices.size()));
-
-    _lastUpdate = util::getSystemTime();
-    _startTime = util::getSystemTime();
 
     DeviceParameters params = getDefaultParameters(runDevices[0]);
 
@@ -644,7 +560,6 @@ int main(int argc, char **argv)
     parser.add("-f", "--follow", false);
     parser.add("", "--list-devices", false);
     parser.add("", "--keyspace", true);
-    parser.add("", "--continue", true);
     parser.add("", "--share", true);
     parser.add("", "--stride", true);
 
@@ -685,8 +600,6 @@ int main(int argc, char **argv)
 				_config.resultsFile = optArg.arg;
             } else if(optArg.equals("", "--list-devices")) {
                 listDevices = true;
-            } else if(optArg.equals("", "--continue")) {
-                _config.checkpointFile = optArg.arg;
             } else if(optArg.equals("", "--keyspace")) {
                 secp256k1::uint256 start;
                 secp256k1::uint256 end;
@@ -801,10 +714,6 @@ int main(int argc, char **argv)
 	} else if(optUncompressed) {
 		_config.compression = PointCompressionType::UNCOMPRESSED;
 	}
-
-    if(_config.checkpointFile.length() > 0) {
-        readCheckpointFile();
-    }
 
     return run();
 }
