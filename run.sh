@@ -7,10 +7,16 @@ cd "$ROOT"
 mkdir -p data dist logs .cache
 
 MIN_BALANCE_SPEC="${RNG_MIN_BALANCE:-}"
+BLOOM_LEVEL="${RNG_BLOOM_LEVEL:-8}"
+ISLAND_LEVEL="${RNG_ISLAND_LEVEL:-4}"
 PASSTHROUGH_ARGS=()
 for arg in "$@"; do
   if [[ "$arg" =~ ^[0-9]+([.][0-9]+)?[bB][tT][cC]$ ]]; then
     MIN_BALANCE_SPEC="$arg"
+  elif [[ "$arg" =~ ^[bB][lL][oO][oO][mM]([0-9])$ ]]; then
+    BLOOM_LEVEL="${BASH_REMATCH[1]}"
+  elif [[ "$arg" =~ ^[iI][sS][lL][aA][nN][dD]([0-9])$ ]]; then
+    ISLAND_LEVEL="${BASH_REMATCH[1]}"
   else
     PASSTHROUGH_ARGS+=("$arg")
   fi
@@ -43,6 +49,23 @@ if [[ -n "$MIN_BALANCE_SPEC" && "$MIN_BALANCE_SATS" -le 0 ]]; then
   echo "Invalid balance filter '$MIN_BALANCE_SPEC'. Use values like 1btc or 10btc." >&2
   exit 1
 fi
+if [[ "$BLOOM_LEVEL" =~ ^[bB][lL][oO][oO][mM]([0-9])$ ]]; then
+  BLOOM_LEVEL="${BASH_REMATCH[1]}"
+fi
+if [[ ! "$BLOOM_LEVEL" =~ ^[0-9]$ ]]; then
+  echo "Invalid bloom level '$BLOOM_LEVEL'. Use bloom0 through bloom9." >&2
+  exit 1
+fi
+if [[ "$ISLAND_LEVEL" =~ ^[iI][sS][lL][aA][nN][dD]([0-9])$ ]]; then
+  ISLAND_LEVEL="${BASH_REMATCH[1]}"
+fi
+if [[ ! "$ISLAND_LEVEL" =~ ^[0-9]$ ]]; then
+  echo "Invalid island level '$ISLAND_LEVEL'. Use island0 through island9." >&2
+  exit 1
+fi
+export RNG_MIN_BALANCE_SATS="$MIN_BALANCE_SATS"
+export RNG_BLOOM_LEVEL="$BLOOM_LEVEL"
+export RNG_ISLAND_LEVEL="$ISLAND_LEVEL"
 
 REPO="${RNG_REPO:-github.com/alastorid/rng}"
 DATA_BRANCH="${RNG_DATA_BRANCH:-data}"
@@ -274,7 +297,7 @@ else
 fi
 
 DUMP="$(ensure_data)"
-TARGETS="$(ensure_targets "$DUMP")"
+TARGETS="${RNG_TARGETS_FILE:-$DUMP}"
 
 ARGS=(--compressed --continue "$CONTINUE_FILE" -i "$TARGETS" -o "$OUT_FILE")
 if [[ -n "$KEYSPACE" ]]; then

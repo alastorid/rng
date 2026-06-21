@@ -123,7 +123,9 @@ void statusCallback(KeySearchStatus info)
 		speedStr = util::format("%.2f", info.speed) + " MKey/s";
 	}
 
-	std::string totalStr = "(" + util::formatThousands(_config.totalkeys + info.total) + " total)";
+    std::string totalStr = "(" + util::formatThousands(_config.totalkeys + info.total) + " total)";
+
+    std::string fpStr = "FP " + util::formatThousands(info.falsePositives) + "/" + util::format("%.1f", info.falsePositiveRate) + "s";
 
 	std::string timeStr = "[" + util::formatSeconds((unsigned int)((_config.elapsed + info.totalTime) / 1000)) + "]";
 
@@ -141,12 +143,12 @@ void statusCallback(KeySearchStatus info)
     const char *formatStr = NULL;
 
     if(_config.follow) {
-        formatStr = "%s %s/%sMB | %s %s %s %s\n";
+        formatStr = "%s %s/%sMB | %s %s %s %s %s\n";
     } else {
-        formatStr = "\r%s %s / %sMB | %s %s %s %s";
+        formatStr = "\r%s %s / %sMB | %s %s %s %s %s";
     }
 
-	printf(formatStr, devName.c_str(), usedMemStr.c_str(), totalMemStr.c_str(), targetStr.c_str(), speedStr.c_str(), totalStr.c_str(), timeStr.c_str());
+	printf(formatStr, devName.c_str(), usedMemStr.c_str(), totalMemStr.c_str(), targetStr.c_str(), speedStr.c_str(), totalStr.c_str(), fpStr.c_str(), timeStr.c_str());
 
     if(_config.checkpointFile.length() > 0) {
         uint64_t t = util::getSystemTime();

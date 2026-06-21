@@ -14,6 +14,8 @@ typedef struct {
     unsigned int x[8];
     unsigned int y[8];
     unsigned int digest[5];
+    unsigned int keyOffsetLo;
+    unsigned int keyOffsetHi;
 }CLDeviceResult;
 
 ulong rotl64(ulong x, int k)
@@ -300,14 +302,16 @@ void hashPublicKeyCompressed(uint256_t x, unsigned int yParity, __private unsign
 
 }
 
-void atomicListAdd(__global CLDeviceResult *results, __global unsigned int *numResults, __private CLDeviceResult *r)
+void atomicListAdd(__global CLDeviceResult *results, __global unsigned int *numResults, unsigned int maxResults, __private CLDeviceResult *r)
 {
     unsigned int count = atomic_add(numResults, 1);
 
-    results[count] = *r;
+    if(count < maxResults) {
+        results[count] = *r;
+    }
 }
 
-void setResultFound(int idx, bool compressed, uint256_t x, uint256_t y, __private unsigned int digest[5], __global CLDeviceResult* results, __global unsigned int* numResults)
+void setResultFound(int idx, bool compressed, uint256_t x, uint256_t y, __private unsigned int digest[5], __global CLDeviceResult* results, __global unsigned int* numResults, unsigned int maxResults, ulong keyOffset)
 {
     CLDeviceResult r;
 
@@ -320,8 +324,10 @@ void setResultFound(int idx, bool compressed, uint256_t x, uint256_t y, __privat
     }
 
     doRMD160FinalRound(digest, r.digest);
+    r.keyOffsetLo = (unsigned int)(keyOffset & 0xffffffffUL);
+    r.keyOffsetHi = (unsigned int)(keyOffset >> 32);
 
-    atomicListAdd(results, numResults, &r);
+    atomicListAdd(results, numResults, maxResults, &r);
 }
 
 void doIteration(
@@ -336,7 +342,9 @@ void doIteration(
     size_t numTargets,
     ulong mask,
     __global CLDeviceResult *results,
-    __global unsigned int *numResults)
+    __global unsigned int *numResults,
+    unsigned int maxResults,
+    ulong keyOffset)
 {
     int gid = get_local_size(0) * get_group_id(0) + get_local_id(0);
     int dim = get_global_size(0);
@@ -362,7 +370,7 @@ void doIteration(
             hashPublicKey(x, y, digest);
 
             if(checkHash(digest, targetList, numTargets, mask)) {
-                setResultFound(i, false, x, y, digest, results, numResults);
+                setResultFound(i, false, x, y, digest, results, numResults, maxResults, keyOffset);
             }
         }
 
@@ -372,7 +380,7 @@ void doIteration(
 
             if(checkHash(digest, targetList, numTargets, mask)) {
                 uint256_t y = yPtr[i];
-                setResultFound(i, true, x, y, digest, results, numResults);
+                setResultFound(i, true, x, y, digest, results, numResults, maxResults, keyOffset);
             }
         }
 
@@ -409,7 +417,9 @@ void doIterationWithDouble(
     size_t numTargets,
     ulong mask,
     __global CLDeviceResult *results,
-    __global unsigned int *numResults)
+    __global unsigned int *numResults,
+    unsigned int maxResults,
+    ulong keyOffset)
 {
     int gid = get_local_size(0) * get_group_id(0) + get_local_id(0);
     int dim = get_global_size(0);
@@ -435,7 +445,7 @@ void doIterationWithDouble(
             hashPublicKey(x, y, digest);
 
             if(checkHash(digest, targetList, numTargets, mask)) {
-                setResultFound(i, false, x, y, digest, results, numResults);
+                setResultFound(i, false, x, y, digest, results, numResults, maxResults, keyOffset);
             }
         }
 
@@ -447,7 +457,7 @@ void doIterationWithDouble(
             if(checkHash(digest, targetList, numTargets, mask)) {
 
                 uint256_t y = yPtr[i];
-                setResultFound(i, true, x, y, digest, results, numResults);
+                setResultFound(i, true, x, y, digest, results, numResults, maxResults, keyOffset);
             }
         }
 
@@ -485,9 +495,11 @@ __kernel void keyFinderKernel(
     ulong numTargets,
     ulong mask,
     __global CLDeviceResult *results,
-    __global unsigned int *numResults)
+    __global unsigned int *numResults,
+    unsigned int maxResults,
+    ulong keyOffset)
 {
-    doIteration(totalPoints, compression, chain, xPtr, yPtr, incXPtr, incYPtr, targetList, numTargets, mask, results, numResults);
+    doIteration(totalPoints, compression, chain, xPtr, yPtr, incXPtr, incYPtr, targetList, numTargets, mask, results, numResults, maxResults, keyOffset);
 }
 
 __kernel void keyFinderKernelWithDouble(
@@ -502,7 +514,9 @@ __kernel void keyFinderKernelWithDouble(
     ulong numTargets,
     ulong mask,
     __global CLDeviceResult *results,
-    __global unsigned int *numResults)
+    __global unsigned int *numResults,
+    unsigned int maxResults,
+    ulong keyOffset)
 {
-    doIterationWithDouble(totalPoints, compression, chain, xPtr, yPtr, incXPtr, incYPtr, targetList, numTargets, mask, results, numResults);
+    doIterationWithDouble(totalPoints, compression, chain, xPtr, yPtr, incXPtr, incYPtr, targetList, numTargets, mask, results, numResults, maxResults, keyOffset);
 }

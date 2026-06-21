@@ -1,5 +1,6 @@
 #include <fstream>
 #include <algorithm>
+#include <cstdlib>
 #include <deque>
 #include <future>
 #include <iostream>
@@ -17,7 +18,52 @@ static void sortUniqueTargets(std::vector<KeySearchTarget> &targets)
 	targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
 }
 
-static std::vector<KeySearchTarget> parseTargetBatch(std::vector<std::string> lines, uint64_t firstLine)
+struct TargetLoadOptions {
+	uint64_t minBalanceSats = 0;
+	size_t addressColumn = 0;
+	size_t balanceColumn = 1;
+};
+
+static std::vector<std::string> splitTargetColumns(const std::string &line)
+{
+	std::vector<std::string> columns;
+	size_t start = 0;
+
+	for(size_t i = 0; i <= line.length(); i++) {
+		if(i == line.length() || line[i] == '\t' || line[i] == ',') {
+			columns.push_back(line.substr(start, i - start));
+			start = i + 1;
+		}
+	}
+
+	return columns;
+}
+
+static uint64_t getMinBalanceSats()
+{
+	const char *env = std::getenv("RNG_MIN_BALANCE_SATS");
+	if(env == NULL || std::string(env).length() == 0) {
+		return 0;
+	}
+
+	return util::parseUInt64(std::string(env));
+}
+
+static uint64_t parseBalanceSats(const std::vector<std::string> &columns, size_t balanceColumn)
+{
+	if(columns.size() <= balanceColumn) {
+		return 0;
+	}
+
+	std::string balance = util::trim(columns[balanceColumn]);
+	if(balance.length() == 0) {
+		return 0;
+	}
+
+	return util::parseUInt64(balance);
+}
+
+static std::vector<KeySearchTarget> parseTargetBatch(std::vector<std::string> lines, uint64_t firstLine, TargetLoadOptions options)
 {
 	std::vector<KeySearchTarget> targets;
 	targets.reserve(lines.size());
@@ -29,15 +75,28 @@ static std::vector<KeySearchTarget> parseTargetBatch(std::vector<std::string> li
 			continue;
 		}
 
-		if(!Address::verifyAddress(line)) {
-			if(firstLine > 0) {
-				throw KeySearchException("Invalid address '" + line + "' on line " + util::format((uint64_t)(firstLine + i)));
+		std::vector<std::string> columns = splitTargetColumns(line);
+		if(columns.size() <= options.addressColumn) {
+			continue;
+		}
+
+		if(options.minBalanceSats > 0 && columns.size() > options.balanceColumn) {
+			uint64_t balance = parseBalanceSats(columns, options.balanceColumn);
+			if(balance < options.minBalanceSats) {
+				continue;
 			}
-			throw KeySearchException("Invalid address '" + line + "'");
+		}
+
+		std::string address = util::trim(columns[options.addressColumn]);
+		if(!Address::verifyAddress(address)) {
+			if(firstLine > 0) {
+				throw KeySearchException("Invalid address '" + address + "' on line " + util::format((uint64_t)(firstLine + i)));
+			}
+			throw KeySearchException("Invalid address '" + address + "'");
 		}
 
 		KeySearchTarget t;
-		Address::toHash160(line, t.value);
+		Address::toHash160(address, t.value);
 		targets.push_back(t);
 	}
 
@@ -94,7 +153,8 @@ void KeyFinder::setTargets(std::vector<std::string> &targets)
 
 	_targets.clear();
 
-	_targets = parseTargetBatch(targets, 0);
+	TargetLoadOptions options;
+	_targets = parseTargetBatch(targets, 0, options);
 
     _device->setTargets(_targets);
 }
@@ -120,20 +180,39 @@ void KeyFinder::setTargets(std::string targetsFile)
 	size_t maxPending = (size_t)workers * 2;
 	std::vector<std::string> batch;
 	std::deque<std::future<std::vector<KeySearchTarget> > > pending;
+	TargetLoadOptions options;
+	options.minBalanceSats = getMinBalanceSats();
 
 	Logger::log(LogLevel::Info, "Loading addresses from '" + targetsFile + "'");
 	Logger::log(LogLevel::Info, "Parsing targets with " + util::format((uint32_t)workers) + " CPU threads");
 	Logger::log(LogLevel::Info, "Using RAM-first target loading");
+	if(options.minBalanceSats > 0) {
+		Logger::log(LogLevel::Info, "Filtering target rows with balance >= " + util::formatThousands(options.minBalanceSats) + " sats during load");
+	}
 
 	batch.reserve(batchSize);
 	while(std::getline(inFile, line)) {
 		util::removeNewline(line);
 		lineNumber++;
+
+		if(lineNumber == 1) {
+			std::vector<std::string> columns = splitTargetColumns(line);
+			if(columns.size() > 0 && util::toLower(util::trim(columns[0])) == "address") {
+				for(size_t i = 0; i < columns.size(); i++) {
+					std::string name = util::toLower(util::trim(columns[i]));
+					if(name == "balance" || name == "balance_satoshi" || name == "balance_satoshis") {
+						options.balanceColumn = i;
+					}
+				}
+				continue;
+			}
+		}
+
 		batch.push_back(line);
 
 		if(batch.size() >= batchSize) {
 			uint64_t firstLine = lineNumber - batch.size() + 1;
-			pending.push_back(std::async(std::launch::async, parseTargetBatch, std::move(batch), firstLine));
+			pending.push_back(std::async(std::launch::async, parseTargetBatch, std::move(batch), firstLine, options));
 			batch.clear();
 			batch.reserve(batchSize);
 
@@ -147,7 +226,7 @@ void KeyFinder::setTargets(std::string targetsFile)
 
 	if(batch.size() > 0) {
 		uint64_t firstLine = lineNumber - batch.size() + 1;
-		pending.push_back(std::async(std::launch::async, parseTargetBatch, std::move(batch), firstLine));
+		pending.push_back(std::async(std::launch::async, parseTargetBatch, std::move(batch), firstLine, options));
 	}
 
 	while(!pending.empty()) {
@@ -233,6 +312,7 @@ void KeyFinder::run()
 	timer.start();
 
 	uint64_t prevIterCount = 0;
+	uint64_t prevFalsePositiveCount = 0;
 
 	_totalTime = 0;
 
@@ -270,12 +350,15 @@ void KeyFinder::run()
 			info.deviceMemory = totalMem;
 			info.deviceName = _device->getDeviceName();
 			info.targets = _targets.size();
+			info.falsePositives = _device->getFalsePositiveCount();
+			info.falsePositiveRate = (double)(info.falsePositives - prevFalsePositiveCount) / seconds;
             info.nextKey = getNextKey();
 
 			_statusCallback(info);
 
 			timer.start();
 			prevIterCount = _iterCount;
+			prevFalsePositiveCount = info.falsePositives;
 			_totalTime += t;
 		}
 

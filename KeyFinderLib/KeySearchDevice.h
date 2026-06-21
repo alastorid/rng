@@ -59,6 +59,11 @@ public:
     // Memory information for this device
     virtual void getMemoryInfo(uint64_t &freeMem, uint64_t &totalMem) = 0;
 
+    virtual uint64_t getFalsePositiveCount()
+    {
+        return 0;
+    }
+
     virtual secp256k1::uint256 getNextKey() = 0;
 };
 

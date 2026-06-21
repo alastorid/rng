@@ -54,6 +54,9 @@ private:
     uint64_t _rngIslandSize = 4096;
     uint64_t _rngIslandOffset = 0;
     bool _rngIslandReady = false;
+    uint32_t _resultQueueCapacity = 65536;
+    uint32_t _resultDrainThreshold = 4096;
+    uint64_t _falsePositiveCount = 0;
 
     std::string _deviceName;
 
@@ -105,7 +108,7 @@ private:
     void setTargetsList();
     void setBloomFilter();
 
-    void getResultsInternal();
+    void getResultsInternal(bool force = false);
 
     bool isTargetInList(const unsigned int hash[5]);
 
@@ -143,6 +146,7 @@ public:
 
     // Memory information for this device
     virtual void getMemoryInfo(uint64_t &freeMem, uint64_t &totalMem);
+    virtual uint64_t getFalsePositiveCount();
 
     virtual secp256k1::uint256 getNextKey();
 };

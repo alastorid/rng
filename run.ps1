@@ -6,10 +6,18 @@ Set-Location $Root
 New-Item -ItemType Directory -Force -Path "data", "dist", "logs", ".cache" | Out-Null
 
 $MinBalanceSpec = if ($env:RNG_MIN_BALANCE) { $env:RNG_MIN_BALANCE } else { "" }
+$BloomLevel = if ($env:RNG_BLOOM_LEVEL) { $env:RNG_BLOOM_LEVEL } else { "8" }
+$IslandLevel = if ($env:RNG_ISLAND_LEVEL) { $env:RNG_ISLAND_LEVEL } else { "4" }
 $PassThroughArgs = @()
 foreach ($arg in $args) {
     if ($arg -match "^[0-9]+(\.[0-9]+)?btc$") {
         $MinBalanceSpec = $arg
+    }
+    elseif ($arg -match "^bloom([0-9])$") {
+        $BloomLevel = $Matches[1]
+    }
+    elseif ($arg -match "^island([0-9])$") {
+        $IslandLevel = $Matches[1]
     }
     else {
         $PassThroughArgs += $arg
@@ -41,6 +49,21 @@ $MinBalanceSats = Convert-BtcToSats $MinBalanceSpec
 if ($MinBalanceSpec -and $MinBalanceSats -le 0) {
     throw "Invalid balance filter '$MinBalanceSpec'. Use values like 1btc or 10btc."
 }
+if ($BloomLevel -match "^bloom([0-9])$") {
+    $BloomLevel = $Matches[1]
+}
+if ($BloomLevel -notmatch "^[0-9]$") {
+    throw "Invalid bloom level '$BloomLevel'. Use bloom0 through bloom9."
+}
+if ($IslandLevel -match "^island([0-9])$") {
+    $IslandLevel = $Matches[1]
+}
+if ($IslandLevel -notmatch "^[0-9]$") {
+    throw "Invalid island level '$IslandLevel'. Use island0 through island9."
+}
+$env:RNG_MIN_BALANCE_SATS = "$MinBalanceSats"
+$env:RNG_BLOOM_LEVEL = "$BloomLevel"
+$env:RNG_ISLAND_LEVEL = "$IslandLevel"
 
 $Repo = if ($env:RNG_REPO) { $env:RNG_REPO } else { "github.com/alastorid/rng" }
 $ApiRepo = $Repo -replace "^github.com/", ""
@@ -343,7 +366,7 @@ else {
 }
 
 $Dump = Ensure-Data
-$Targets = Ensure-Targets $Dump
+$Targets = if ($env:RNG_TARGETS_FILE) { $env:RNG_TARGETS_FILE } else { $Dump }
 
 $BitCrackArgs = @("--compressed", "--continue", $ContinueFile, "-i", $Targets, "-o", $OutFile)
 if ($Keyspace) {

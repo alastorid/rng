@@ -33,6 +33,8 @@ typedef struct {
     uint64_t freeMemory;
     uint64_t deviceMemory;
     uint64_t targets;
+    uint64_t falsePositives;
+    double falsePositiveRate;
     secp256k1::uint256 nextKey;
 }KeySearchStatus;
 

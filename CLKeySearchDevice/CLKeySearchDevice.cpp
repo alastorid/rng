@@ -8,29 +8,79 @@
 extern char _bitcrack_cl[];
 
 static const int BLOOM_HASHES = 4;
-static const uint64_t DEFAULT_BLOOM_MB = 1024;
+static const int DEFAULT_BLOOM_LEVEL = 8;
+static const int DEFAULT_ISLAND_LEVEL = 4;
 
-static uint64_t getBloomCapBytes()
+static int getBloomLevel()
 {
-    const char *env = std::getenv("RNG_BLOOM_MB");
-    uint64_t mb = DEFAULT_BLOOM_MB;
+    const char *env = std::getenv("RNG_BLOOM_LEVEL");
+    uint64_t level = DEFAULT_BLOOM_LEVEL;
 
     if(env != NULL && env[0] != '\0') {
         try {
-            mb = util::parseUInt64(std::string(env));
+            std::string value = util::toLower(std::string(env));
+            if(value.find("bloom") == 0) {
+                value = value.substr(5);
+            }
+            level = util::parseUInt64(value);
         } catch(...) {
-            mb = DEFAULT_BLOOM_MB;
+            level = DEFAULT_BLOOM_LEVEL;
         }
     }
 
-    if(mb < 64) {
-        mb = 64;
-    }
-    if(mb > 4096) {
-        mb = 4096;
+    if(level > 9) {
+        level = 9;
     }
 
-    return mb * 1024ULL * 1024ULL;
+    return (int)level;
+}
+
+static uint64_t getBloomBitsPerTarget(int level)
+{
+    static const uint64_t bitsPerTarget[] = {
+        4, 6, 8, 12, 16, 24, 32, 64, 128, 256
+    };
+
+    return bitsPerTarget[level];
+}
+
+static int getIslandLevel()
+{
+    const char *env = std::getenv("RNG_ISLAND_LEVEL");
+    uint64_t level = DEFAULT_ISLAND_LEVEL;
+
+    if(env != NULL && env[0] != '\0') {
+        try {
+            std::string value = util::toLower(std::string(env));
+            if(value.find("island") == 0) {
+                value = value.substr(6);
+            }
+            level = util::parseUInt64(value);
+        } catch(...) {
+            level = DEFAULT_ISLAND_LEVEL;
+        }
+    }
+
+    if(level > 9) {
+        level = 9;
+    }
+
+    return (int)level;
+}
+
+static uint64_t getIslandSteps(int level)
+{
+    return 4096ULL << level;
+}
+
+static uint64_t nextPowerOfTwo(uint64_t value)
+{
+    uint64_t p = 1;
+    while(p < value && p < (1ULL << 63)) {
+        p <<= 1;
+    }
+
+    return p;
 }
 
 typedef struct {
@@ -39,6 +89,8 @@ typedef struct {
     unsigned int x[8];
     unsigned int y[8];
     unsigned int digest[5];
+    unsigned int keyOffsetLo;
+    unsigned int keyOffsetHi;
 }CLDeviceResult;
 
 
@@ -178,7 +230,7 @@ void CLKeySearchDevice::allocateBuffers()
 {
     size_t numKeys = (size_t)_points;
     size_t size = numKeys * 8 * sizeof(unsigned int);
-    _pointsMemSize = size * 4;
+    _pointsMemSize = size * 4 + (size_t)_resultQueueCapacity * sizeof(CLDeviceResult);
 
     // X values
     _x = _clContext->malloc(size);
@@ -203,8 +255,10 @@ void CLKeySearchDevice::allocateBuffers()
     _yInc = _clContext->malloc(8 * sizeof(unsigned int), CL_MEM_READ_ONLY);
 
     // Buffer for storing results
-    _deviceResults = _clContext->malloc(128 * sizeof(CLDeviceResult));
+    _deviceResults = _clContext->malloc((size_t)_resultQueueCapacity * sizeof(CLDeviceResult));
     _deviceResultsCount = _clContext->malloc(sizeof(unsigned int));
+    unsigned int numResults = 0;
+    _clContext->copyHostToDevice(&numResults, _deviceResultsCount, sizeof(unsigned int));
 }
 
 void CLKeySearchDevice::setIncrementor(secp256k1::ecpoint &p)
@@ -234,8 +288,10 @@ void CLKeySearchDevice::init(const secp256k1::uint256 &start, int compression, c
         allocateBuffers();
 
         if(_rngMode) {
+            int islandLevel = getIslandLevel();
+            _rngIslandSize = getIslandSteps(islandLevel);
             Logger::log(LogLevel::Info, "OpenCL RNG island mode enabled");
-            Logger::log(LogLevel::Info, "RNG island size: " + util::formatThousands(_rngIslandSize) + " steps");
+            Logger::log(LogLevel::Info, "RNG island size: " + util::formatThousands(_rngIslandSize) + " steps, island" + util::format((uint32_t)islandLevel));
             _rngIslandOffset = 0;
             _rngIslandReady = false;
             initializeBasePoints();
@@ -260,6 +316,7 @@ void CLKeySearchDevice::doStep()
 
         if(_rngMode) {
             if(!_rngIslandReady || _rngIslandOffset >= _rngIslandSize) {
+                getResultsInternal(true);
                 generateRandomStartingPoints();
                 _rngIslandOffset = 0;
                 _rngIslandReady = true;
@@ -277,7 +334,9 @@ void CLKeySearchDevice::doStep()
                 _deviceTargetList.size,
                 _deviceTargetList.mask,
                 _deviceResults,
-                _deviceResultsCount);
+                _deviceResultsCount,
+                _resultQueueCapacity,
+                (cl_ulong)_rngIslandOffset);
             _stepKernel->call(_blocks, _threads);
         } else if(_iterations < 2 && _start.cmp(numKeys) <= 0) {
 
@@ -293,7 +352,9 @@ void CLKeySearchDevice::doStep()
                 _deviceTargetList.size,
                 _deviceTargetList.mask,
                 _deviceResults,
-                _deviceResultsCount);
+                _deviceResultsCount,
+                _resultQueueCapacity,
+                (cl_ulong)_iterations);
             _stepKernelWithDouble->call(_blocks, _threads);
         } else {
 
@@ -309,12 +370,14 @@ void CLKeySearchDevice::doStep()
                 _deviceTargetList.size,
                 _deviceTargetList.mask,
                 _deviceResults,
-                _deviceResultsCount);
+                _deviceResultsCount,
+                _resultQueueCapacity,
+                (cl_ulong)_iterations);
             _stepKernel->call(_blocks, _threads);
         }
         fflush(stdout);
 
-        getResultsInternal();
+        getResultsInternal(false);
 
         if(_rngMode) {
             _rngIslandOffset++;
@@ -347,16 +410,14 @@ void CLKeySearchDevice::setTargetsList()
 
 void CLKeySearchDevice::setBloomFilter()
 {
-    uint64_t bloomFilterMask = getOptimalBloomFilterMask(1.0e-9, _targetList.size());
+    int bloomLevel = getBloomLevel();
+    uint64_t bitsPerTarget = getBloomBitsPerTarget(bloomLevel);
+    uint64_t bloomBits = nextPowerOfTwo((uint64_t)_targetList.size() * bitsPerTarget);
+    uint64_t bloomFilterMask = bloomBits - 1;
     uint64_t maxBloomBytes = _globalMemSize / 4;
-    uint64_t cacheFriendlyMax = getBloomCapBytes();
 
     if(_globalMemSize > _pointsMemSize) {
         maxBloomBytes = ((_globalMemSize - _pointsMemSize) * 3) / 4;
-    }
-
-    if(maxBloomBytes > cacheFriendlyMax) {
-        maxBloomBytes = cacheFriendlyMax;
     }
 
     while(((bloomFilterMask + 1) / 8) > maxBloomBytes && bloomFilterMask > ((1ULL << 28) - 1)) {
@@ -364,7 +425,7 @@ void CLKeySearchDevice::setBloomFilter()
     }
 
     Logger::log(LogLevel::Info, "OpenCL bloom filter: " + util::formatThousands((bloomFilterMask + 1) / 8)
-        + " bytes, " + util::format((uint32_t)BLOOM_HASHES) + " probes");
+        + " bytes, " + util::format((uint32_t)BLOOM_HASHES) + " probes, bloom" + util::format((uint32_t)bloomLevel));
 
     initializeBloomFilter(_targetList, bloomFilterMask);
 }
@@ -426,6 +487,11 @@ void CLKeySearchDevice::getMemoryInfo(uint64_t &freeMem, uint64_t &totalMem)
     totalMem = _globalMemSize;
 }
 
+uint64_t CLKeySearchDevice::getFalsePositiveCount()
+{
+    return _falsePositiveCount;
+}
+
 void CLKeySearchDevice::splatBigInt(unsigned int *ptr, int idx, secp256k1::uint256 &k)
 {
     unsigned int buf[8];
@@ -464,17 +530,26 @@ void CLKeySearchDevice::removeTargetFromList(const unsigned int hash[5])
 }
 
 
-void CLKeySearchDevice::getResultsInternal()
+void CLKeySearchDevice::getResultsInternal(bool force)
 {
     unsigned int numResults = 0;
 
     _clContext->copyDeviceToHost(_deviceResultsCount, &numResults, sizeof(unsigned int));
 
+    if(numResults == 0) {
+        return;
+    }
+
+    if(!force && numResults < _resultDrainThreshold) {
+        return;
+    }
+
     if(numResults > 0) {
-        CLDeviceResult *ptr = new CLDeviceResult[numResults];
+        unsigned int resultsToRead = numResults > _resultQueueCapacity ? _resultQueueCapacity : numResults;
+        CLDeviceResult *ptr = new CLDeviceResult[resultsToRead];
         unsigned int *rngPrivateKeys = NULL;
 
-        _clContext->copyDeviceToHost(_deviceResults, ptr, sizeof(CLDeviceResult) * numResults);
+        _clContext->copyDeviceToHost(_deviceResults, ptr, sizeof(CLDeviceResult) * resultsToRead);
 
         if(_rngMode) {
             rngPrivateKeys = new unsigned int[(size_t)_points * 8];
@@ -483,10 +558,11 @@ void CLKeySearchDevice::getResultsInternal()
 
         unsigned int actualCount = 0;
 
-        for(unsigned int i = 0; i < numResults; i++) {
+        for(unsigned int i = 0; i < resultsToRead; i++) {
 
             // might be false-positive
             if(!isTargetInList(ptr[i].digest)) {
+                _falsePositiveCount++;
                 continue;
             }
             actualCount++;
@@ -494,12 +570,13 @@ void CLKeySearchDevice::getResultsInternal()
             KeySearchResult minerResult;
 
             secp256k1::uint256 privateKey;
+            uint64_t keyOffset = ((uint64_t)ptr[i].keyOffsetHi << 32) | (uint64_t)ptr[i].keyOffsetLo;
 
             if(_rngMode) {
-                privateKey = secp256k1::addModN(readBigInt(rngPrivateKeys, ptr[i].idx), secp256k1::uint256(_rngIslandOffset));
+                privateKey = secp256k1::addModN(readBigInt(rngPrivateKeys, ptr[i].idx), secp256k1::uint256(keyOffset));
             } else {
                 // Calculate the private key based on the number of iterations and the current thread
-                secp256k1::uint256 offset = secp256k1::uint256((uint64_t)_points * _iterations) + secp256k1::uint256(ptr[i].idx) * _stride;
+                secp256k1::uint256 offset = secp256k1::uint256((uint64_t)_points * keyOffset) + secp256k1::uint256(ptr[i].idx) * _stride;
                 privateKey = secp256k1::addModN(_start, offset);
             }
 
