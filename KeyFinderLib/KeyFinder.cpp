@@ -24,11 +24,6 @@ struct TargetLoadOptions {
 	size_t balanceColumn = 1;
 };
 
-struct BatchParseResult {
-	std::vector<KeySearchTarget> targets;
-	uint64_t invalidRows = 0;
-};
-
 static std::vector<std::string> splitTargetColumns(const std::string &line)
 {
 	std::vector<std::string> columns;
@@ -72,10 +67,10 @@ static uint64_t parseBalanceSats(const std::vector<std::string> &columns, size_t
 	}
 }
 
-static BatchParseResult parseTargetBatch(std::vector<std::string> lines, uint64_t firstLine, TargetLoadOptions options)
+static std::vector<KeySearchTarget> parseTargetBatch(std::vector<std::string> lines, uint64_t firstLine, TargetLoadOptions options)
 {
-	BatchParseResult result;
-	result.targets.reserve(lines.size());
+	std::vector<KeySearchTarget> targets;
+	targets.reserve(lines.size());
 
 	for(size_t i = 0; i < lines.size(); i++) {
 		std::string line = util::trim(lines[i]);
@@ -98,24 +93,26 @@ static BatchParseResult parseTargetBatch(std::vector<std::string> lines, uint64_
 
 		std::string address = util::trim(columns[options.addressColumn]);
 		if(!Address::verifyAddress(address)) {
-			if(columns.size() > 1) {
-				result.invalidRows++;
-				continue;
-			}
+			std::string msg = "Invalid address '" + address + "'";
 			if(firstLine > 0) {
-				throw KeySearchException("Invalid address '" + address + "' on line " + util::format((uint64_t)(firstLine + i)));
+				msg += " on line " + util::format((uint64_t)(firstLine + i));
 			}
-			throw KeySearchException("Invalid address '" + address + "'");
+			msg += " using address column " + util::format((uint32_t)(options.addressColumn + 1));
+			if(options.minBalanceSats > 0) {
+				msg += ", balance column " + util::format((uint32_t)(options.balanceColumn + 1));
+			}
+			msg += ". Raw row: " + line;
+			throw KeySearchException(msg);
 		}
 
 		KeySearchTarget t;
 		Address::toHash160(address, t.value);
-		result.targets.push_back(t);
+		targets.push_back(t);
 	}
 
-	sortUniqueTargets(result.targets);
+	sortUniqueTargets(targets);
 
-	return result;
+	return targets;
 }
 
 static void appendTargets(std::vector<KeySearchTarget> &dest, std::vector<KeySearchTarget> &src)
@@ -167,7 +164,7 @@ void KeyFinder::setTargets(std::vector<std::string> &targets)
 	_targets.clear();
 
 	TargetLoadOptions options;
-	_targets = parseTargetBatch(targets, 0, options).targets;
+	_targets = parseTargetBatch(targets, 0, options);
 
     _device->setTargets(_targets);
 }
@@ -203,10 +200,9 @@ std::vector<KeySearchTarget> KeyFinder::loadTargetsFromFile(std::string targetsF
 	}
 	size_t maxPending = (size_t)workers * 2;
 	std::vector<std::string> batch;
-	std::deque<std::future<BatchParseResult> > pending;
+	std::deque<std::future<std::vector<KeySearchTarget> > > pending;
 	TargetLoadOptions options;
 	options.minBalanceSats = getMinBalanceSats();
-	uint64_t invalidRows = 0;
 
 	Logger::log(LogLevel::Info, "Loading addresses from '" + targetsFile + "'");
 	Logger::log(LogLevel::Info, "Parsing targets with " + util::format((uint32_t)workers) + " CPU threads");
@@ -260,10 +256,9 @@ std::vector<KeySearchTarget> KeyFinder::loadTargetsFromFile(std::string targetsF
 			batch.reserve(batchSize);
 
 			while(pending.size() >= maxPending) {
-				BatchParseResult parsed = pending.front().get();
+				std::vector<KeySearchTarget> parsed = pending.front().get();
 				pending.pop_front();
-				appendTargets(targets, parsed.targets);
-				invalidRows += parsed.invalidRows;
+				appendTargets(targets, parsed);
 			}
 		}
 	}
@@ -274,16 +269,12 @@ std::vector<KeySearchTarget> KeyFinder::loadTargetsFromFile(std::string targetsF
 	}
 
 	while(!pending.empty()) {
-		BatchParseResult parsed = pending.front().get();
+		std::vector<KeySearchTarget> parsed = pending.front().get();
 		pending.pop_front();
-		appendTargets(targets, parsed.targets);
-		invalidRows += parsed.invalidRows;
+		appendTargets(targets, parsed);
 	}
 
 	sortUniqueTargets(targets);
-	if(invalidRows > 0) {
-		Logger::log(LogLevel::Info, "Skipped " + util::formatThousands(invalidRows) + " invalid tabular target rows");
-	}
 
 	Logger::log(LogLevel::Info, util::formatThousands(targets.size()) + " addresses loaded ("
 		+ util::format("%.1f", (double)(sizeof(KeySearchTarget) * targets.size()) / (double)(1024 * 1024)) + "MB)");
