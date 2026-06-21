@@ -2,6 +2,7 @@
 #include <exception>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <thread>
 
@@ -65,6 +66,7 @@ std::vector<DeviceManager::DeviceInfo> _devices;
 
 static uint64_t _runningTime = 0;
 static std::mutex _outputMutex;
+static std::map<std::thread::id, KeySearchStatus> _latestStatus;
 
 static std::string hash160ToString(const unsigned int hash[5])
 {
@@ -118,29 +120,58 @@ void statusCallback(KeySearchStatus info)
 {
     std::lock_guard<std::mutex> lock(_outputMutex);
 
+    _latestStatus[std::this_thread::get_id()] = info;
+
+    KeySearchStatus display = info;
+    if(_latestStatus.size() > 1) {
+        display.speed = 0.0;
+        display.total = 0;
+        display.totalTime = 0;
+        display.freeMemory = 0;
+        display.deviceMemory = 0;
+        display.targets = 0;
+        display.falsePositives = 0;
+        display.deviceName = "All OpenCL devices";
+
+        for(std::map<std::thread::id, KeySearchStatus>::const_iterator i = _latestStatus.begin(); i != _latestStatus.end(); ++i) {
+            const KeySearchStatus &s = i->second;
+            display.speed += s.speed;
+            display.total += s.total;
+            if(s.totalTime > display.totalTime) {
+                display.totalTime = s.totalTime;
+            }
+            display.freeMemory += s.freeMemory;
+            display.deviceMemory += s.deviceMemory;
+            if(s.targets > display.targets) {
+                display.targets = s.targets;
+            }
+            display.falsePositives += s.falsePositives;
+        }
+    }
+
 	std::string speedStr;
 
-	if(info.speed < 0.01) {
+	if(display.speed < 0.01) {
 		speedStr = "< 0.01 MKey/s";
 	} else {
-		speedStr = util::format("%.2f", info.speed) + " MKey/s";
+		speedStr = util::format("%.2f", display.speed) + " MKey/s";
 	}
 
-    std::string totalStr = "(" + util::formatThousands(info.total) + " total)";
+    std::string totalStr = "(" + util::formatThousands(display.total) + " total)";
 
-    std::string fpStr = "FP " + util::formatThousands(info.falsePositives);
+    std::string fpStr = "FP " + util::formatThousands(display.falsePositives);
 
-	std::string timeStr = "[" + util::formatSeconds((unsigned int)(info.totalTime / 1000)) + "]";
+	std::string timeStr = "[" + util::formatSeconds((unsigned int)(display.totalTime / 1000)) + "]";
 
-	std::string usedMemStr = util::format((info.deviceMemory - info.freeMemory) /(1024 * 1024));
+	std::string usedMemStr = util::format((display.deviceMemory - display.freeMemory) /(1024 * 1024));
 
-	std::string totalMemStr = util::format(info.deviceMemory / (1024 * 1024));
+	std::string totalMemStr = util::format(display.deviceMemory / (1024 * 1024));
 
-    std::string targetStr = util::format(info.targets) + " target" + (info.targets > 1 ? "s" : "");
+    std::string targetStr = util::format(display.targets) + " target" + (display.targets > 1 ? "s" : "");
 
 
 	// Fit device name in 16 characters, pad with spaces if less
-	std::string devName = info.deviceName.substr(0, 16);
+	std::string devName = display.deviceName.substr(0, 16);
 	devName += std::string(16 - devName.length(), ' ');
 
     const char *formatStr = NULL;

@@ -35,15 +35,15 @@ inline uint4 hi4_256k(uint256_t x)
 
 inline uint256_t load256k(__global const uint256_t* ara, int idx)
 {
-    __global const uint4 *v = (__global const uint4 *)ara;
-    return make256k(v[idx * 2], v[idx * 2 + 1]);
+    __global const uint *words = (__global const uint *)ara;
+    return make256k(vload4(idx * 2, words), vload4(idx * 2 + 1, words));
 }
 
 inline void store256k(__global uint256_t* ara, int idx, uint256_t value)
 {
-    __global uint4 *v = (__global uint4 *)ara;
-    v[idx * 2] = lo4_256k(value);
-    v[idx * 2 + 1] = hi4_256k(value);
+    __global uint *words = (__global uint *)ara;
+    vstore4(lo4_256k(value), idx * 2, words);
+    vstore4(hi4_256k(value), idx * 2 + 1, words);
 }
 
 inline unsigned int wordFrom4(uint4 v, int word)
@@ -345,14 +345,17 @@ unsigned int readLSW(__global const unsigned int *ara, int idx)
 
 unsigned int readLSW256k(__global const uint256_t* ara, int idx)
 {
-    __global const uint4 *v = (__global const uint4 *)ara;
-    return v[idx * 2 + 1].s3;
+    return vload4(idx * 2 + 1, (__global const uint *)ara).s3;
 }
 
 unsigned int readWord256k(__global const uint256_t* ara, int idx, int word)
 {
-    __global const uint4 *v = (__global const uint4 *)ara;
-    return wordFrom4(v[idx * 2 + (word >> 2)], word);
+    __global const uint *words = (__global const uint *)ara;
+    if(word < 4) {
+        return wordFrom4(vload4(idx * 2, words), word);
+    }
+
+    return wordFrom4(vload4(idx * 2 + 1, words), word);
 }
 
 unsigned int addP(const unsigned int a[8], unsigned int c[8])
