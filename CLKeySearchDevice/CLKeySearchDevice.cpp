@@ -1,4 +1,5 @@
 #include <cmath>
+#include <cstdlib>
 #include "Logger.h"
 #include "util.h"
 #include "CLKeySearchDevice.h"
@@ -7,6 +8,30 @@
 extern char _bitcrack_cl[];
 
 static const int BLOOM_HASHES = 4;
+static const uint64_t DEFAULT_BLOOM_MB = 1024;
+
+static uint64_t getBloomCapBytes()
+{
+    const char *env = std::getenv("RNG_BLOOM_MB");
+    uint64_t mb = DEFAULT_BLOOM_MB;
+
+    if(env != NULL && env[0] != '\0') {
+        try {
+            mb = util::parseUInt64(std::string(env));
+        } catch(...) {
+            mb = DEFAULT_BLOOM_MB;
+        }
+    }
+
+    if(mb < 64) {
+        mb = 64;
+    }
+    if(mb > 4096) {
+        mb = 4096;
+    }
+
+    return mb * 1024ULL * 1024ULL;
+}
 
 typedef struct {
     int idx;
@@ -324,7 +349,7 @@ void CLKeySearchDevice::setBloomFilter()
 {
     uint64_t bloomFilterMask = getOptimalBloomFilterMask(1.0e-9, _targetList.size());
     uint64_t maxBloomBytes = _globalMemSize / 4;
-    uint64_t cacheFriendlyMax = 2ULL * 1024ULL * 1024ULL * 1024ULL;
+    uint64_t cacheFriendlyMax = getBloomCapBytes();
 
     if(_globalMemSize > _pointsMemSize) {
         maxBloomBytes = ((_globalMemSize - _pointsMemSize) * 3) / 4;
